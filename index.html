@@ -70,6 +70,13 @@ main{padding:16px 16px 8px}
   padding:13px 15px;font-size:16px;font-style:italic;color:var(--ink2);margin-bottom:16px}
 .aviso{background:#FDEEDD;color:var(--amber);border-radius:10px;padding:11px 13px;font-size:14.5px;font-weight:600;margin-bottom:14px}
 .falta{color:var(--amber);font-weight:650}
+.escolha{background:#FDF3E6;border-top:1px solid #F0DCC0;padding:12px 14px}
+.escolha .sec-t{color:var(--amber);margin-bottom:8px}
+.escolha .chip{border-color:#E8CBA4}
+.card.pisca{animation:pisca 1s ease-out 2}
+@keyframes pisca{0%,100%{box-shadow:var(--shadow)}50%{box-shadow:0 0 0 4px rgba(178,91,0,.35)}}
+.ensinar{width:100%;margin-top:10px;border:1.5px dashed var(--green);color:var(--green);
+  background:#F1F7F2;border-radius:10px;padding:11px;font-size:14.5px;font-weight:650;text-align:center}
 .pend{margin-top:22px;font-size:15px;color:var(--ink2);padding:9px 16px;border-radius:999px;background:#ECEAE4;font-weight:600}
 .photobtn{margin-top:26px;display:inline-flex;align-items:center;gap:8px;font-size:15.5px;font-weight:650;color:var(--ink2);padding:11px 20px;border:1.5px solid var(--line);border-radius:999px;background:var(--card)}
 
@@ -554,23 +561,23 @@ function tocar(g, botao){
 /* ============ vocabulário do Rob ============ */
 const VOCAB_VERSAO = 1;
 const VOCAB_AREAS = [
-  {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda"]},
-  {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita"]},
-  {nome:"Linha escondida",   tipo:"Linha", apelidos:["escondida","linha de tras"]},
-  {nome:"Linha Piscina 1",   tipo:"Linha", apelidos:["piscina 1","linha piscina um"]},
-  {nome:"Linha Piscina 2A",  tipo:"Linha", apelidos:["piscina 2a","linha 2a"]},
-  {nome:"Linha Piscina 2B",  tipo:"Linha", apelidos:["piscina 2b","linha 2b"]},
-  {nome:"Linha do tomate",   tipo:"Linha", apelidos:["linha dos tomates","tomate","tomates"]},
-  {nome:"Estufa 1",          tipo:"Estufa",apelidos:["estufa um"]},
-  {nome:"Estufa 2",          tipo:"Estufa",apelidos:["estufa dois"]},
-  {nome:"Estufa 3",          tipo:"Estufa",apelidos:["estufa tres"]}
+  {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
+  {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
+  {nome:"Linha escondida",   tipo:"Linha", apelidos:["escondida","linha de tras","linda escondida"]},
+  {nome:"Linha Piscina 1",   tipo:"Linha", apelidos:["piscina 1","linha piscina um","piscina um"]},
+  {nome:"Linha Piscina 2A",  tipo:"Linha", apelidos:["piscina 2a","linha 2a","piscina dois a"]},
+  {nome:"Linha Piscina 2B",  tipo:"Linha", apelidos:["piscina 2b","linha 2b","piscina dois b"]},
+  {nome:"Linha do tomate",   tipo:"Linha", apelidos:["linha dos tomates","tomate","tomates","linha do tomates"]},
+  {nome:"Estufa 1",          tipo:"Estufa",apelidos:["estufa um","estofa um","estufa hum"]},
+  {nome:"Estufa 2",          tipo:"Estufa",apelidos:["estufa dois","estofa dois"]},
+  {nome:"Estufa 3",          tipo:"Estufa",apelidos:["estufa tres","estofa tres"]}
 ];
 const VOCAB_INSUMOS = [
-  {nome:"Chorume",              tipo:"Biofertilizante", unidade:"L",  apelidos:["churume"]},
-  {nome:"Cinza",                tipo:"Corretivo",       unidade:"kg", apelidos:["cinzas"]},
-  {nome:"Defensivo Neem",       tipo:"Defensivo",       unidade:"L",  apelidos:["neem","nim","oleo de neem"]},
-  {nome:"Terra de minhocário",  tipo:"Adubo",           unidade:"L",  apelidos:["minhocario","humus","terra de minhoca"]},
-  {nome:"Esterco",              tipo:"Adubo",           unidade:"kg", apelidos:["esterco de gado","estrume"]}
+  {nome:"Chorume",              tipo:"Biofertilizante", unidade:"L",  apelidos:["churume","chorumes","ciume","ciumes","chorome","xurume","surume","chorumi"]},
+  {nome:"Cinza",                tipo:"Corretivo",       unidade:"kg", apelidos:["cinzas","sinza","sinzas"]},
+  {nome:"Defensivo Neem",       tipo:"Defensivo",       unidade:"L",  apelidos:["neem","nim","oleo de neem","ni em","nini"]},
+  {nome:"Terra de minhocário",  tipo:"Adubo",           unidade:"L",  apelidos:["minhocario","humus","terra de minhoca","minhoca","minhocário"]},
+  {nome:"Esterco",              tipo:"Adubo",           unidade:"kg", apelidos:["esterco de gado","estrume","isterco","esterço"]}
 ];
 
 /* Instala o vocabulário sem duplicar nada. Se já existe algo com o mesmo nome,
@@ -705,18 +712,54 @@ function acharNoTexto(txt, itens, termosDe, minSim){
   return melhor;
 }
 
+/* "ouvidos" são as coisas que o Chrome entrega no lugar do verbo certo.
+   "reguei" vira "cheguei" e "peguei" o tempo todo. */
+const PALAVRA_BOBA = /^(a|o|as|os|na|no|nas|nos|de|da|do|dos|das|em|por|com|e|um|uma|que|pra|para|linha|estufa|piscina|hoje|ontem)$/;
+
+function melhorJanela(txt, termos){
+  const toks = txt.split(" ");
+  let melhor = null;
+  termos.forEach(termo => {
+    const nt = termo.split(" ").length;
+    for(let i = 0; i < toks.length; i++){
+      for(let n = Math.max(1, nt-1); n <= nt+1 && i+n <= toks.length; n++){
+        const j = toks.slice(i, i+n).join(" ");
+        if(j.length < 3 || PALAVRA_BOBA.test(j)) continue;
+        const s = parecido(j, termo);
+        if(!melhor || s > melhor.s) melhor = {s, janela:j};
+      }
+    }
+  });
+  return melhor;
+}
+
 const ACOES = [
-  {p:"reguei",    tipo:"irrigacao"}, {p:"regei", tipo:"irrigacao"}, {p:"regamos", tipo:"irrigacao"},
-  {p:"irriguei",  tipo:"irrigacao"}, {p:"irrigamos", tipo:"irrigacao"}, {p:"molhei", tipo:"irrigacao"},
-  {p:"pulverizei",tipo:"insumo", forma:"Foliar"}, {p:"pulverizamos", tipo:"insumo", forma:"Foliar"},
-  {p:"adicionei", tipo:"insumo"}, {p:"adubei", tipo:"insumo"}, {p:"apliquei", tipo:"insumo"},
-  {p:"botei",     tipo:"insumo"}, {p:"coloquei", tipo:"insumo"}, {p:"passei", tipo:"insumo"},
-  {p:"podei",     tipo:"poda"},   {p:"podamos", tipo:"poda"}, {p:"fiz a poda", tipo:"poda"},
-  {p:"plantei",   tipo:"plantio"},{p:"plantamos", tipo:"plantio"}, {p:"semeei", tipo:"plantio"},
-  {p:"comecei o plantio", tipo:"plantio"}, {p:"comecei plantio", tipo:"plantio"},
-  {p:"colhi",     tipo:"colheita"},{p:"colhemos", tipo:"colheita"}
+  {p:"reguei", tipo:"irrigacao", ouvidos:["cheguei","peguei","seguei","leguei","reguei a","regue","rega","regar","reguem","reguei o"]},
+  {p:"regei",  tipo:"irrigacao", ouvidos:[]},
+  {p:"regamos",tipo:"irrigacao", ouvidos:[]},
+  {p:"irriguei",tipo:"irrigacao",ouvidos:["irrigue","irrigou","irrigar","irriguei a"]},
+  {p:"irrigamos",tipo:"irrigacao",ouvidos:[]},
+  {p:"molhei", tipo:"irrigacao", ouvidos:["molho","molhou","molhar"]},
+  {p:"pulverizei",tipo:"insumo", forma:"Foliar", ouvidos:["pulverize","pulverizou","pulverizar"]},
+  {p:"pulverizamos",tipo:"insumo", forma:"Foliar", ouvidos:[]},
+  {p:"adicionei",tipo:"insumo", ouvidos:["adicione","adicionou","adicionar","adicionei o","adicionar o"]},
+  {p:"adubei", tipo:"insumo", ouvidos:["adubou","adubar","aduba"]},
+  {p:"apliquei",tipo:"insumo", ouvidos:["aplique","aplicou","aplicar"]},
+  {p:"botei",  tipo:"insumo", ouvidos:["botou","botar"]},
+  {p:"coloquei",tipo:"insumo", ouvidos:["coloque","colocou","colocar"]},
+  {p:"passei", tipo:"insumo", ouvidos:["passou","passar"]},
+  {p:"podei",  tipo:"poda", ouvidos:["pode","podem","podar","podou","poderei","podei a"]},
+  {p:"podamos",tipo:"poda", ouvidos:[]},
+  {p:"fiz a poda",tipo:"poda", ouvidos:["fiz poda","fez a poda"]},
+  {p:"plantei",tipo:"plantio", ouvidos:["plante","plantou","plantar"]},
+  {p:"plantamos",tipo:"plantio", ouvidos:[]},
+  {p:"semeei", tipo:"plantio", ouvidos:["semear","semeou"]},
+  {p:"comecei o plantio", tipo:"plantio", ouvidos:["comecei plantio","comecou o plantio","comece o plantio"]},
+  {p:"colhi",  tipo:"colheita", ouvidos:["colher","colhe","colheu","corri"]},
+  {p:"colhemos",tipo:"colheita", ouvidos:[]}
 ];
-const acharAcao = txt => acharNoTexto(txt, ACOES, a => [a.p], 0.82);
+const termosDaAcao = a => [a.p].concat(a.ouvidos || []);
+const acharAcao = txt => acharNoTexto(txt, ACOES, termosDaAcao, 0.74);
 
 const METODOS_RE = [[/\bmicro ?aspers/,"Microaspersão"],[/\bgotej/,"Gotejo"],[/\baspers|aspersor/,"Aspersão"],
                     [/\bmangueir/,"Mangueira"],[/\bregador|balde|manual/,"Manual"]];
@@ -790,7 +833,7 @@ function interpretar(falaOriginal, ctx){
     else if(/\bde tarde|a tarde|pela tarde\b/.test(frag)) d.hora = "15:00";
 
     const acao = acharAcao(frag);
-    const ins  = acharNoTexto(frag, insumos, termosDoInsumo, 0.75);
+    const ins  = acharNoTexto(frag, insumos, termosDoInsumo, 0.72);
 
     if(acao){
       d.tipo = acao.item.tipo;
@@ -800,9 +843,11 @@ function interpretar(falaOriginal, ctx){
     } else if(ins){
       d.tipo = "insumo";
     }
+    if(!acao && !ins && /\d+\s*(minutos?|min\b|horas?|litros?|l\b)/.test(frag) && /\b(linha|estufa|piscina)\b/.test(frag))
+      d.tipo = "irrigacao";   /* "…a linha da direita por 20 minutos" sem verbo entendido */
     if(ins && (d.tipo === "insumo")){ d.insumoId = ins.item.id; if(!d.unidade) d.unidade = ins.item.unidade; }
 
-    const ar = acharNoTexto(frag, areas, termosDaArea, 0.75);
+    const ar = acharNoTexto(frag, areas, termosDaArea, 0.72);
     if(ar){ d.areaId = ar.item.id; areaHerdada = ar.item.id; d.areaConfianca = ar.s; }
     else if(areaHerdada && d.tipo !== "observacao") d.areaId = areaHerdada;
 
@@ -1111,10 +1156,29 @@ function telaConfirmar(texto, drafts, g){
     else formObs(pre);
   }
 
+  const cartoes = [];
+  const falaNorm = normalizarFala(texto);
+
+  function ensinarBotao(d, tipo, item, termos){
+    const mj = melhorJanela(falaNorm, termos);
+    if(!mj || mj.s >= 0.72 || mj.s < 0.3) return null;
+    const b = el("button","ensinar");
+    b.innerHTML = "Ensinar: “" + esc(mj.janela) + "” é " + esc(item.nome);
+    b.onclick = async () => {
+      item.apelidos = [...new Set((item.apelidos||[]).concat(mj.janela))];
+      await put(tipo === "area" ? "areas" : "insumos", item);
+      toast("Aprendido. Da próxima vez ele entende “" + mj.janela + "”.");
+      b.remove();
+    };
+    return b;
+  }
+
   function desenhar(){
     lista.innerHTML = "";
+    cartoes.length = 0;
     drafts.forEach((d, ix) => {
       const c = el("div","card"); c.style.marginBottom = "12px";
+      cartoes[ix] = c;
       const b = el("button","row");
       b.appendChild(el("div","dot d-" + d.tipo));
       const bd = el("div","bd");
@@ -1126,56 +1190,76 @@ function telaConfirmar(texto, drafts, g){
       if(!d.areaId && d.tipo !== "observacao") faltas.push("não entendi a área");
       if(d.tipo === "insumo" && !d.insumoId) faltas.push("não entendi o insumo");
       if(d.tipo === "plantio" && !d.cultura) faltas.push("falta a cultura");
-      if(faltas.length){ const f = el("div","t2 falta", esc(faltas.join(" · "))); bd.appendChild(f); }
+      if(faltas.length) bd.appendChild(el("div","t2 falta", esc(faltas.join(" · "))));
       b.appendChild(bd);
       b.appendChild(el("div","rt","editar"));
       b.onclick = () => editar(ix);
       c.appendChild(b);
 
-      /* não reconheceu a área: mostra as suas, em botões grandes */
       if(!d.areaId && d.tipo !== "observacao"){
-        const esc1 = el("div"); esc1.style.padding = "0 14px 4px";
-        esc1.appendChild(el("div","sec-t","Qual área?"));
+        const bloco = el("div","escolha");
+        bloco.appendChild(el("div","sec-t","Toque na área certa"));
         const chips = el("div","chips");
-        S.areas.forEach(a => {
-          const ch = el("button","chip", esc(a.nome));
-          ch.onclick = () => { drafts.forEach(x => { if(!x.areaId) x.areaId = a.id; }); desenhar(); };
+        S.areas.forEach(ar => {
+          const ch = el("button","chip", esc(ar.nome));
+          ch.onclick = () => {
+            drafts.forEach(x => { if(!x.areaId) x.areaId = ar.id; });
+            d._ensinarArea = ar;
+            desenhar();
+          };
           chips.appendChild(ch);
         });
-        esc1.appendChild(chips);
-        c.appendChild(esc1);
+        bloco.appendChild(chips);
+        c.appendChild(bloco);
+      } else if(d._ensinarArea){
+        const bt = ensinarBotao(d, "area", d._ensinarArea, termosDaArea(d._ensinarArea));
+        if(bt){ const w2 = el("div"); w2.style.padding = "0 14px 12px"; w2.appendChild(bt); c.appendChild(w2); }
       }
-      /* não reconheceu o insumo: idem */
+
       if(d.tipo === "insumo" && !d.insumoId){
-        const esc2 = el("div"); esc2.style.padding = "10px 14px 4px";
-        esc2.appendChild(el("div","sec-t","Qual insumo?"));
+        const bloco = el("div","escolha");
+        bloco.appendChild(el("div","sec-t","Toque no insumo certo"));
         const chips = el("div","chips");
         S.insumos.forEach(i => {
           const ch = el("button","chip", esc(i.nome));
-          ch.onclick = () => { d.insumoId = i.id; if(!d.unidade) d.unidade = i.unidade; desenhar(); };
+          ch.onclick = () => {
+            d.insumoId = i.id;
+            if(!d.unidade) d.unidade = i.unidade;
+            d._ensinarIns = i;
+            desenhar();
+          };
           chips.appendChild(ch);
         });
-        esc2.appendChild(chips);
-        c.appendChild(esc2);
+        bloco.appendChild(chips);
+        c.appendChild(bloco);
+      } else if(d._ensinarIns){
+        const bt = ensinarBotao(d, "insumo", d._ensinarIns, termosDoInsumo(d._ensinarIns));
+        if(bt){ const w2 = el("div"); w2.style.padding = "0 14px 12px"; w2.appendChild(bt); c.appendChild(w2); }
       }
 
-      const acts = el("div","grav-acts"); acts.style.padding = "10px 14px 14px";
       if(drafts.length > 1){
+        const acts = el("div","grav-acts"); acts.style.padding = "10px 14px 14px";
         const rm = el("button","mini d"); rm.textContent = "Remover";
         rm.onclick = () => { drafts.splice(ix,1); desenhar(); };
-        acts.appendChild(rm);
+        acts.appendChild(rm); c.appendChild(acts);
       }
-      if(acts.children.length) c.appendChild(acts);
       lista.appendChild(c);
     });
   }
   desenhar();
 
+  const cobrar = (ix, msg) => {
+    showErr(eb, msg);
+    const c = cartoes[ix];
+    if(c){ c.classList.add("pisca"); c.scrollIntoView({block:"center", behavior:"smooth"}); setTimeout(()=>c.classList.remove("pisca"), 2200); }
+  };
+
   const salvar = async () => {
-    for(const d of drafts){
-      if(d.tipo !== "observacao" && !d.areaId) return showErr(eb, "Escolha a área nos botões acima.");
-      if(d.tipo === "insumo" && !d.insumoId) return showErr(eb, "Escolha o insumo nos botões acima.");
-      if(d.tipo === "plantio" && !d.cultura) return showErr(eb, "Falta dizer o que foi plantado. Toque em “editar”.");
+    for(let ix = 0; ix < drafts.length; ix++){
+      const d = drafts[ix];
+      if(d.tipo !== "observacao" && !d.areaId) return cobrar(ix, "Falta a área — toque num dos botões laranjas.");
+      if(d.tipo === "insumo" && !d.insumoId) return cobrar(ix, "Falta o insumo — toque num dos botões laranjas.");
+      if(d.tipo === "plantio" && !d.cultura) return cobrar(ix, "Falta dizer o que foi plantado — toque em “editar”.");
     }
     if(g){
       g.status = "processada";
@@ -1185,6 +1269,7 @@ function telaConfirmar(texto, drafts, g){
 
     for(const d of drafts){
       const r = Object.assign({}, d);
+      Object.keys(r).forEach(k => { if(k[0] === "_") delete r[k]; });
       delete r.areaSugerida; delete r.insumoSugerido; delete r.areaConfianca;
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
