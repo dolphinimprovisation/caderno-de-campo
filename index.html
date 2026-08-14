@@ -434,6 +434,16 @@ function tocar(g,botao){
 function areaOptions(){ return S.areas.map(a=>({label:a.nome,value:a.id})); }
 const defArea = pre => (pre&&pre.areaId) || S.config.ultimaArea || (S.areas.length===1?S.areas[0].id:"");
 
+/* campo de área com atalho pra criar uma nova sem sair do registro */
+function campoArea(sel, aoCriar){
+  const wrap=el("div");
+  wrap.appendChild(field("Área", sel));
+  const nv=el("button","linkbtn","+ Nova área");
+  nv.onclick=()=>formArea(null, aoCriar);
+  wrap.appendChild(nv);
+  return wrap;
+}
+
 function needAreas(){
   if(S.areas.length) return false;
   const w=el("div");
@@ -447,8 +457,9 @@ function formIrrigacao(pre){
   const eb=errBox(), w=el("div"); w.appendChild(eb);
   const fArea=selectEl(areaOptions(),defArea(pre)), fData=input("date",pre.data||todayISO()), fHora=input("time",pre.hora||nowHM());
   const fMet=chipGroup(METODOS,pre.metodo||S.config.ultimoMetodo||null);
-  const fDur=input("number",pre.duracao||"","minutos"), fVol=input("number","","litros"), fObs=textarea("","opcional");
-  w.appendChild(field("Área",fArea));
+  const fDur=input("number",pre.duracao||"","minutos"), fVol=input("number",pre.volume||"","litros"), fObs=textarea(pre.obs||"","opcional");
+  const snap=()=>Object.assign({},pre,{data:fData.value,hora:fHora.value,metodo:fMet.value(),duracao:fDur.value,volume:fVol.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formIrrigacao(Object.assign(snap(),{areaId:na.id}))));
   const t1=el("div","two"); t1.appendChild(field("Data",fData)); t1.appendChild(field("Hora",fHora)); w.appendChild(t1);
   w.appendChild(field("Método",fMet));
   const t2=el("div","two"); t2.appendChild(field("Duração (min)",fDur)); t2.appendChild(field("Volume (L)",fVol)); w.appendChild(t2);
@@ -470,12 +481,16 @@ function formInsumo(pre){
   }
   const eb=errBox(), w=el("div"); w.appendChild(eb);
   const fArea=selectEl(areaOptions(),defArea(pre)), fIns=selectEl(S.insumos.map(i=>({label:i.nome,value:i.id})),"");
-  const fQtd=input("number","","quantidade"), fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),"",null);
-  const fForma=chipGroup(FORMAS,null), fData=input("date",pre.data||todayISO()), fObs=textarea("","opcional");
+  const fQtd=input("number",pre.quantidade||"","quantidade"), fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),pre.unidade||"",null);
+  const fForma=chipGroup(FORMAS,pre.forma||null), fData=input("date",pre.data||todayISO()), fObs=textarea(pre.obs||"","opcional");
+  fIns.value = pre.insumoId || "";
   fIns.onchange=()=>{ const i=insumoById(fIns.value); if(i&&i.unidade) fUni.value=i.unidade; };
-  w.appendChild(field("Área",fArea));
+  const snap=()=>Object.assign({},pre,{insumoId:fIns.value,quantidade:fQtd.value,unidade:fUni.value,forma:fForma.value(),data:fData.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formInsumo(Object.assign(snap(),{areaId:na.id}))));
   const fi=el("div"); fi.appendChild(field("Insumo",fIns));
-  const nv=el("button","linkbtn","+ Cadastrar novo insumo"); nv.onclick=()=>formCadInsumo(null,()=>formInsumo(pre)); fi.appendChild(nv); w.appendChild(fi);
+  const nv=el("button","linkbtn","+ Cadastrar novo insumo");
+  nv.onclick=()=>formCadInsumo(null, novo=>formInsumo(Object.assign(snap(),{insumoId:novo.id, unidade:novo.unidade||""})));
+  fi.appendChild(nv); w.appendChild(fi);
   const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
   w.appendChild(field("Forma de aplicação",fForma));
   w.appendChild(field("Data",fData));
@@ -496,9 +511,11 @@ function formInsumo(pre){
 function formPlantio(pre){
   if(needAreas()) return; pre=pre||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
-  const fArea=selectEl(areaOptions(),defArea(pre)), fCult=input("text","","ex: alface, jaca, tomate"), fVar=input("text","","opcional");
-  const fData=input("date",pre.data||todayISO()), fQtd=input("number","","nº de mudas"), fCol=input("date",""), fObs=textarea("","opcional");
-  w.appendChild(field("Área",fArea)); w.appendChild(field("Cultura",fCult)); w.appendChild(field("Variedade",fVar));
+  const fArea=selectEl(areaOptions(),defArea(pre)), fCult=input("text",pre.cultura||"","ex: alface, jaca, tomate"), fVar=input("text",pre.variedade||"","opcional");
+  const fData=input("date",pre.data||todayISO()), fQtd=input("number",pre.quantidade||"","nº de mudas"), fCol=input("date",pre.previsao||""), fObs=textarea(pre.obs||"","opcional");
+  const snap=()=>Object.assign({},pre,{cultura:fCult.value,variedade:fVar.value,data:fData.value,quantidade:fQtd.value,previsao:fCol.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formPlantio(Object.assign(snap(),{areaId:na.id}))));
+  w.appendChild(field("Cultura",fCult)); w.appendChild(field("Variedade",fVar));
   const t=el("div","two"); t.appendChild(field("Data do plantio",fData)); t.appendChild(field("Quantidade",fQtd)); w.appendChild(t);
   w.appendChild(field("Previsão de colheita",fCol,"Pode deixar em branco."));
   w.appendChild(field("Observação",fObs));
@@ -519,9 +536,10 @@ function formPlantio(pre){
 function formColheita(pre){
   if(needAreas()) return; pre=pre||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
-  const fArea=selectEl(areaOptions(),defArea(pre)), fQtd=input("number","","quantidade");
-  const fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),"kg",null), fData=input("date",pre.data||todayISO()), fObs=textarea("","opcional");
-  w.appendChild(field("Área",fArea));
+  const fArea=selectEl(areaOptions(),defArea(pre)), fQtd=input("number",pre.quantidade||"","quantidade");
+  const fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),pre.unidade||"kg",null), fData=input("date",pre.data||todayISO()), fObs=textarea(pre.obs||"","opcional");
+  const snap=()=>Object.assign({},pre,{quantidade:fQtd.value,unidade:fUni.value,data:fData.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formColheita(Object.assign(snap(),{areaId:na.id}))));
   const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
   w.appendChild(field("Data",fData)); w.appendChild(field("Observação",fObs));
   openSheet("Registrar colheita",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
@@ -538,7 +556,7 @@ function formObs(pre){
   const eb=errBox(), w=el("div"); w.appendChild(eb);
   const fArea=selectEl(areaOptions(),defArea(pre),"— sem área —");
   const fData=input("date",pre.data||todayISO());
-  const fTxt=textarea("","O que você viu? ex: folhas amareladas na ponta da linha 3");
+  const fTxt=textarea(pre.obs||"","O que você viu? ex: folhas amareladas na ponta da linha 3");
   let foto=pre.foto||null;
   const fotoWrap=el("div");
   const fb=el("button","photobtn","&#128247; Tirar ou escolher foto"); fb.style.marginTop="0";
@@ -549,7 +567,8 @@ function formObs(pre){
   fotoWrap.appendChild(fb); fotoWrap.appendChild(prev); mostrar();
   if(foto) mostrar();
 
-  w.appendChild(field("Área",fArea));
+  const snap=()=>Object.assign({},pre,{data:fData.value,obs:fTxt.value,foto:foto});
+  w.appendChild(campoArea(fArea, na=>formObs(Object.assign(snap(),{areaId:na.id}))));
   w.appendChild(field("Data",fData));
   w.appendChild(field("Observação",fTxt));
   w.appendChild(field("Foto",fotoWrap,"A foto fica guardada com a data e a área. Com o tempo vira uma linha do tempo visual pro agente analisar."));
