@@ -1819,6 +1819,23 @@ function novoCaderno(){
 }
 const codigoBonito = c => (c||"").replace(/(.{6})/g, "$1 ").trim();
 
+/* Ao ligar a sincronia, o que já está no aparelho precisa subir também.
+   Sem isso, só viaja o que for tocado dali pra frente — e o diário antigo fica preso. */
+async function marcarTudoPendente(){
+  let n = 0;
+  for(const loja of Object.keys(TIPO_DA_LOJA)){
+    for(const o of (S[loja] || [])){
+      if(!o.atualizadoEm){
+        o.atualizadoEm = o.criadoEm || new Date().toISOString();
+        await putBruto(loja, o);
+      }
+      await marcarPendente(loja, o.id, false, o.atualizadoEm);
+      n++;
+    }
+  }
+  return n;
+}
+
 let sincronizando = false, timerSync = null;
 function agendarSync(){
   if(!S.config.caderno) return;
@@ -1899,6 +1916,8 @@ function screenSincronia(){
 
     const b1 = btn("Ligar a sincronia","pri", async () => {
       await saveCfg({caderno: novoCaderno(), syncEm: null});
+      const n = await marcarTudoPendente();
+      toast("Enviando " + n + " item(ns) deste aparelho…");
       await sincronizar(false);
       screenSincronia();
     });
@@ -1912,6 +1931,7 @@ function screenSincronia(){
       const c = (inp.value||"").replace(/\s/g,"").toLowerCase();
       if(!/^[a-z0-9]{16,64}$/.test(c)) return toast("Código inválido.");
       await saveCfg({caderno: c, syncEm: null});
+      await marcarTudoPendente();
       await sincronizar(false);
       screenSincronia();
     });
@@ -1944,6 +1964,14 @@ function screenSincronia(){
 
     const b1 = btn("Sincronizar agora","pri", () => sincronizar(false));
     b1.style.marginTop = "6px"; v.appendChild(b1);
+
+    const b3 = btn("Enviar tudo deste aparelho","sec", async () => {
+      const n = await marcarTudoPendente();
+      toast("Pondo " + n + " item(ns) na fila…");
+      await sincronizar(false);
+      screenSincronia();
+    });
+    b3.style.marginTop = "10px"; b3.style.flex = "1"; v.appendChild(b3);
 
     const b2 = btn("Desligar a sincronia","dng", () => confirmDel("Desligar a sincronia?",
       "Os dados continuam neste aparelho e o que já subiu continua na nuvem. Só para de enviar.",
@@ -2052,7 +2080,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
