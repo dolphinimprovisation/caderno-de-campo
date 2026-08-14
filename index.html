@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2E6B3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Caderno de Campo</title>
+<style>
+:root{
+  --bg:#F7F5F0; --card:#FFFFFF; --ink:#16200F; --ink2:#4A5546; --line:#DCD8CE;
+  --green:#2E6B3E; --green-d:#1F4C2C; --blue:#1565A0; --amber:#B25B00;
+  --purple:#5B4B8A; --red:#B3261E; --shadow:0 1px 3px rgba(0,0,0,.10),0 4px 14px rgba(0,0,0,.05);
+  --r:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:400 17px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:84px; overscroll-behavior-y:contain;
+}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit;width:100%}
+.hide{display:none !important}
+
+header{
+  position:sticky;top:0;z-index:30;background:var(--green);color:#fff;
+  padding:14px 18px;padding-top:calc(14px + env(safe-area-inset-top));
+  display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)
+}
+header h1{font-size:19px;flex:1}
+header .sub{font-size:13px;opacity:.85;font-weight:400;display:block;margin-top:1px}
+.iconbtn{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:20px;background:rgba(255,255,255,.14)}
+
+main{padding:16px 16px 8px}
+.sec{margin-bottom:26px}
+.sec-t{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.empty{background:var(--card);border:1px dashed var(--line);border-radius:var(--r);padding:22px 18px;text-align:center;color:var(--ink2);font-size:15px}
+
+/* ---------- tela inicial ---------- */
+.home{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:10px 8px 0}
+.plant{width:132px;height:132px;display:block}
+.st-t{font-size:21px;font-weight:700;margin-top:2px}
+.st-s{font-size:15px;color:var(--ink2);margin-top:5px;max-width:300px;line-height:1.4}
+.st-t.ok{color:var(--green)} .st-t.atencao{color:var(--amber)} .st-t.atraso{color:var(--red)}
+
+.micwrap{margin:34px 0 0}
+.mic{
+  width:176px;height:176px;border-radius:50%;background:var(--green);color:#fff;
+  display:grid;place-items:center;box-shadow:0 6px 20px rgba(46,107,62,.34);
+  transition:transform .1s, background .2s
+}
+.mic:active{transform:scale(.96)}
+.mic.rec{background:var(--red);box-shadow:0 6px 20px rgba(179,38,30,.34);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(179,38,30,.42),0 6px 20px rgba(179,38,30,.34)}
+                 60%{box-shadow:0 0 0 22px rgba(179,38,30,0),0 6px 20px rgba(179,38,30,.34)}}
+.mic svg{width:66px;height:66px}
+.miclb{margin-top:18px;font-size:17px;font-weight:650;color:var(--ink2)}
+.mictime{font-variant-numeric:tabular-nums;color:var(--red)}
+.pend{margin-top:22px;font-size:15px;color:var(--ink2);padding:9px 16px;border-radius:999px;background:#ECEAE4;font-weight:600}
+.photobtn{margin-top:26px;display:inline-flex;align-items:center;gap:8px;font-size:15.5px;font-weight:650;color:var(--ink2);padding:11px 20px;border:1.5px solid var(--line);border-radius:999px;background:var(--card)}
+
+/* ---------- listas ---------- */
+.row{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:flex-start;width:100%;text-align:left}
+.row:last-child{border-bottom:0}
+.row .dot{width:10px;height:10px;border-radius:50%;margin-top:7px;flex:0 0 10px}
+.row .bd{flex:1;min-width:0}
+.row .t1{font-weight:600;font-size:16px}
+.row .t2{font-size:14px;color:var(--ink2);margin-top:2px}
+.row .rt{font-size:13px;color:var(--ink2);white-space:nowrap;padding-top:2px}
+.d-irrigacao{background:var(--blue)} .d-insumo{background:var(--amber)}
+.d-plantio{background:var(--green)} .d-colheita{background:var(--green-d)}
+.d-observacao{background:var(--purple)}
+.thumb{width:44px;height:44px;border-radius:9px;object-fit:cover;flex:0 0 44px;background:#ECEAE4}
+
+.daygrp{margin-bottom:14px}
+.dayhd{font-size:13px;font-weight:700;color:var(--ink2);margin:0 4px 6px;text-transform:capitalize}
+
+.acard{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;width:100%;text-align:left}
+.acard:last-child{border-bottom:0}
+.acard .bd{flex:1;min-width:0}
+.acard .nm{font-weight:650;font-size:17px}
+.acard .mt{font-size:14px;color:var(--ink2);margin-top:2px}
+.pill{font-size:12.5px;font-weight:650;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.pill.ok{background:#E4F0E6;color:var(--green-d)}
+.pill.warn{background:#FDEEDD;color:var(--amber)}
+.pill.bad{background:#FBE6E4;color:var(--red)}
+.pill.neutral{background:#ECEAE4;color:var(--ink2)}
+
+/* ---------- gravacoes ---------- */
+.grav{padding:14px 16px;border-bottom:1px solid var(--line)}
+.grav:last-child{border-bottom:0}
+.grav-top{display:flex;align-items:center;gap:12px}
+.play{width:46px;height:46px;border-radius:50%;background:var(--green);color:#fff;display:grid;place-items:center;flex:0 0 46px;font-size:17px}
+.play.on{background:var(--ink)}
+.grav .bd{flex:1;min-width:0}
+.grav .t1{font-weight:650;font-size:16px}
+.grav .t2{font-size:14px;color:var(--ink2);margin-top:2px}
+.grav-acts{display:flex;gap:8px;margin-top:12px}
+.mini{flex:1;border:1.5px solid var(--line);background:var(--card);border-radius:10px;padding:10px;font-size:14.5px;font-weight:650;color:var(--ink2);text-align:center}
+.mini.d{color:var(--red);border-color:#E3B7B4}
+
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--card);
+  border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);
+  padding-bottom:env(safe-area-inset-bottom)
+}
+nav button{padding:9px 0 10px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--ink2);font-size:11.5px;font-weight:600;position:relative}
+nav button .ic{font-size:20px;line-height:1}
+nav button.on{color:var(--green)}
+.badge{position:absolute;top:4px;right:calc(50% - 24px);background:var(--red);color:#fff;font-size:10.5px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:grid;place-items:center;padding:0 5px}
+
+.scrim{position:fixed;inset:0;background:rgba(20,25,18,.45);z-index:40;opacity:0;pointer-events:none;transition:opacity .18s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--bg);
+  border-radius:20px 20px 0 0;max-height:92vh;display:flex;flex-direction:column;
+  transform:translateY(100%);transition:transform .22s cubic-bezier(.3,.8,.4,1)
+}
+.sheet.on{transform:translateY(0)}
+.sheet-h{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card);border-radius:20px 20px 0 0}
+.sheet-h h2{flex:1;font-size:18px}
+.sheet-b{overflow-y:auto;padding:16px;flex:1;-webkit-overflow-scrolling:touch}
+.sheet-f{padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card);display:flex;gap:10px}
+
+.f{margin-bottom:18px}
+.f > label{display:block;font-size:14px;font-weight:650;color:var(--ink2);margin-bottom:7px}
+.f .hint{font-size:13px;color:var(--ink2);font-weight:400;margin-top:6px}
+input[type=text],input[type=number],input[type=date],input[type=time],select,textarea{
+  background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:14px;min-height:52px
+}
+input:focus,select:focus,textarea:focus{outline:0;border-color:var(--green)}
+textarea{min-height:104px;resize:vertical}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--card);border:1.5px solid var(--line);border-radius:999px;padding:11px 16px;font-size:15px;font-weight:600;color:var(--ink2)}
+.chip.on{background:var(--green);border-color:var(--green);color:#fff}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{border-radius:12px;padding:15px;font-weight:700;font-size:17px;text-align:center;flex:1}
+.btn.pri{background:var(--green);color:#fff}
+.btn.sec{background:var(--card);border:1.5px solid var(--line);color:var(--ink2);flex:0 0 40%}
+.btn.dng{background:var(--card);border:1.5px solid #E3B7B4;color:var(--red)}
+.btn:active{opacity:.8}
+.linkbtn{color:var(--green);font-weight:650;font-size:15px;padding:6px 0}
+.err{background:#FBE6E4;color:var(--red);border-radius:10px;padding:11px 13px;font-size:14.5px;font-weight:600;margin-bottom:14px}
+.photoprev{width:100%;border-radius:12px;margin-top:10px;display:block}
+
+#toast{position:fixed;left:16px;right:16px;bottom:96px;z-index:70;background:var(--ink);color:#fff;border-radius:12px;padding:14px 16px;font-size:15.5px;font-weight:600;box-shadow:var(--shadow);opacity:0;transform:translateY(10px);transition:.2s;pointer-events:none}
+#toast.on{opacity:1;transform:translateY(0)}
+
+.menu-item{display:flex;align-items:center;gap:14px;padding:16px;border-bottom:1px solid var(--line);width:100%;text-align:left;font-size:16.5px;font-weight:600}
+.menu-item:last-child{border-bottom:0}
+.menu-item .ic{font-size:20px;width:26px;text-align:center}
+.menu-item .ch{color:var(--ink2);font-weight:400;font-size:15px}
+.kv{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:15.5px}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--ink2)}
+.kv span:last-child{font-weight:650;text-align:right}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="iconbtn hide" id="backBtn" aria-label="Voltar">&#8592;</button>
+  <h1 id="hdTitle">Caderno de Campo<span class="sub" id="hdSub"></span></h1>
+</header>
+
+<main id="view"></main>
+
+<nav>
+  <button data-tab="home" class="on"><span class="ic">&#127793;</span>Início</button>
+  <button data-tab="pend"><span class="ic">&#127908;</span>Gravações</button>
+  <button data-tab="diario"><span class="ic">&#128220;</span>Diário</button>
+  <button data-tab="mais"><span class="ic">&#9776;</span>Mais</button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-h"><h2 id="shTitle"></h2><button class="iconbtn" id="shClose" style="background:#ECEAE4;color:var(--ink2)">&#10005;</button></div>
+  <div class="sheet-b" id="shBody"></div>
+  <div class="sheet-f" id="shFoot"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* ============ util ============ */
+const $ = s => document.querySelector(s);
+const el = (t,c,h) => { const n=document.createElement(t); if(c)n.className=c; if(h!==undefined)n.innerHTML=h; return n; };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+const MS_DAY = 86400000;
+function todayISO(){ const d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+function nowHM(){ const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function dayStart(iso){ const [y,m,d]=iso.slice(0,10).split("-").map(Number); return new Date(y,m-1,d).getTime(); }
+function daysAgo(iso){ return Math.floor((dayStart(todayISO()) - dayStart(iso)) / MS_DAY); }
+function fmtDay(iso){
+  const n = daysAgo(iso);
+  if(n===0) return "Hoje";
+  if(n===1) return "Ontem";
+  const [y,m,d]=iso.slice(0,10).split("-");
+  const dt=new Date(+y,+m-1,+d);
+  const wd=["domingo","segunda","terça","quarta","quinta","sexta","sábado"][dt.getDay()];
+  return (n<7? wd+", " : "") + d+"/"+m + (String(new Date().getFullYear())!==y ? "/"+y : "");
+}
+function fmtAgo(iso){ const n=daysAgo(iso); return n===0?"hoje":n===1?"ontem":"há "+n+" dias"; }
+function fmtDur(s){ return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(t._x); t._x=setTimeout(()=>t.classList.remove("on"),3000); }
+function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite(n)?n:null; }
+function fmtNum(n){ return String(n).replace(".",","); }
+
+/* ============ banco ============ */
+const DB_NAME="caderno-campo", DB_VER=2;
+const STORES=["areas","insumos","plantios","registros","gravacoes","config"];
+let _db=null;
+function open(){
+  return new Promise((ok,err)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{ const d=e.target.result; STORES.forEach(s=>{ if(!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:"id"}); }); };
+    r.onsuccess=e=>{ _db=e.target.result; ok(_db); };
+    r.onerror=e=>err(e.target.error);
+  });
+}
+function tx(store,mode){ return _db.transaction(store,mode).objectStore(store); }
+function put(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").put(obj); r.onsuccess=()=>ok(obj); r.onerror=e=>err(e.target.error); }); }
+function del(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
+function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly").getAll(); r.onsuccess=()=>ok(r.result||[]); r.onerror=e=>err(e.target.error); }); }
+function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
+
+/* ============ estado ============ */
+const S = { areas:[], insumos:[], plantios:[], registros:[], gravacoes:[], config:{} };
+async function load(){
+  const [a,i,p,r,g,c] = await Promise.all(STORES.map(all));
+  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.gravacoes=g;
+  S.config = (c.find(x=>x.id==="app")||{id:"app"});
+}
+const areaById = id => S.areas.find(a=>a.id===id);
+const insumoById = id => S.insumos.find(x=>x.id===id);
+const sortedRegs = () => S.registros.slice().sort((a,b)=> (b.data+(b.hora||"")).localeCompare(a.data+(a.hora||"")) );
+const pendentes = () => S.gravacoes.filter(g=>g.status!=="processada").sort((a,b)=>(b.data+b.hora).localeCompare(a.data+a.hora));
+
+function ultimaIrrigacao(areaId){
+  const rs=S.registros.filter(r=>r.tipo==="irrigacao"&&r.areaId===areaId).sort((a,b)=>b.data.localeCompare(a.data));
+  return rs.length? rs[0].data : null;
+}
+function plantiosAtivos(areaId){ return S.plantios.filter(p=>p.areaId===areaId && p.status!=="encerrado"); }
+
+/* ============ status geral (a plantinha) ============ */
+function statusGeral(){
+  if(!S.areas.length && !S.registros.length && !S.gravacoes.length)
+    return {nivel:"ok", t:"Comece falando", s:"Toque no microfone e diga o que você fez. Depois eu organizo."};
+
+  const comFreq = S.areas.filter(a=>a.frequencia>0);
+  if(!comFreq.length)
+    return {nivel:"ok", t:"Tudo tranquilo", s:"Pra eu avisar de atraso, defina “irrigar a cada X dias” nas suas áreas."};
+
+  const atrasadas=[], nolimite=[], nunca=[];
+  comFreq.forEach(a=>{
+    const ui=ultimaIrrigacao(a.id);
+    if(!ui){ nunca.push(a); return; }
+    const d=daysAgo(ui)-a.frequencia;
+    if(d>0) atrasadas.push({a,d}); else if(d===0) nolimite.push(a);
+  });
+
+  if(atrasadas.length){
+    atrasadas.sort((x,y)=>y.d-x.d);
+    const t = atrasadas.length===1 ? atrasadas[0].a.nome+" atrasada" : atrasadas.length+" áreas atrasadas";
+    const s = atrasadas.length===1
+      ? (atrasadas[0].d===1? "1 dia além do combinado." : atrasadas[0].d+" dias além do combinado.")
+      : atrasadas.map(x=>x.a.nome+" ("+x.d+"d)").join(" · ");
+    return {nivel:"atraso", t, s};
+  }
+  if(nunca.length)
+    return {nivel:"atencao", t:"Falta registrar", s:(nunca.length===1?nunca[0].nome:nunca.length+" áreas")+" sem nenhuma irrigação registrada."};
+  if(nolimite.length)
+    return {nivel:"atencao", t:"Vence hoje", s:(nolimite.length===1?nolimite[0].nome:nolimite.length+" áreas")+" chegou no prazo de irrigar."};
+  return {nivel:"ok", t:"Tudo em dia", s:"Nenhuma área atrasada."};
+}
+
+function plantaSVG(nivel){
+  const C = nivel==="atraso" ? {f1:"#C4452F",f2:"#A63A28",st:"#8C6239",d:20,o:.92}
+          : nivel==="atencao"? {f1:"#D89A16",f2:"#B87F0E",st:"#6D8C3F",d:9, o:1}
+          :                    {f1:"#48A55C",f2:"#2E7D42",st:"#3F7A2E",d:0, o:1};
+  return `<svg class="plant" viewBox="0 0 100 100" aria-hidden="true">
+    <ellipse cx="50" cy="95" rx="26" ry="4" fill="#000" opacity=".07"/>
+    <path d="M31 70 L35 90 Q35.5 93 39 93 L61 93 Q64.5 93 65 90 L69 70 Z" fill="#B98055"/>
+    <rect x="28" y="63" width="44" height="9" rx="4" fill="#CE9367"/>
+    <path d="M50 66 C50 55 50 46 50 33" stroke="${C.st}" stroke-width="3.6" fill="none" stroke-linecap="round" opacity="${C.o}"/>
+    <g transform="rotate(${C.d} 50 48)">
+      <path d="M49 50 C37 51 28 45 25 36 C36 33 46 40 49 50 Z" fill="${C.f1}" opacity="${C.o}"/>
+    </g>
+    <g transform="rotate(${-C.d} 50 43)">
+      <path d="M51 44 C63 45 72 39 75 30 C64 27 54 34 51 44 Z" fill="${C.f2}" opacity="${C.o}"/>
+    </g>
+    <g transform="rotate(${C.d*0.6} 50 30)">
+      <path d="M50 33 C46 25 48 16 55 11 C60 18 58 29 50 33 Z" fill="${C.f1}" opacity="${C.o}"/>
+    </g>
+  </svg>`;
+}
+
+/* ============ rotulos ============ */
+const TIPO_LB={irrigacao:"Irrigação",insumo:"Insumo",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
+const METODOS=["Gotejo","Aspersão","Microaspersão","Mangueira","Manual"];
+const FORMAS=["Fertirrigação","Foliar","No solo","Cobertura"];
+const TIPOS_AREA=["Estufa","Canteiro","Talhão","Linha","Vaso","Outro"];
+const TIPOS_INS=["Adubo","Biofertilizante","Defensivo","Corretivo","Outro"];
+const UNIDADES=["L","mL","kg","g","un"];
+
+function descRegistro(r){
+  const p=[];
+  if(r.tipo==="irrigacao"){ if(r.duracao)p.push(r.duracao+" min"); if(r.volume)p.push(fmtNum(r.volume)+" L"); if(r.metodo)p.push(r.metodo); }
+  else if(r.tipo==="insumo"){ const i=insumoById(r.insumoId); if(i)p.push(i.nome); if(r.quantidade)p.push(fmtNum(r.quantidade)+" "+(r.unidade||"")); if(r.forma)p.push(r.forma); }
+  else if(r.tipo==="plantio"){ if(r.cultura)p.push(r.cultura); if(r.variedade)p.push(r.variedade); if(r.quantidade)p.push(fmtNum(r.quantidade)+" mudas"); }
+  else if(r.tipo==="colheita"){ if(r.quantidade)p.push(fmtNum(r.quantidade)+" "+(r.unidade||"kg")); }
+  if(r.obs)p.push(r.obs);
+  return p.join(" · ");
+}
+
+/* ============ sheet ============ */
+function openSheet(title, bodyNode, footNodes){
+  $("#shTitle").textContent=title;
+  const b=$("#shBody"); b.innerHTML=""; b.appendChild(bodyNode); b.scrollTop=0;
+  const f=$("#shFoot"); f.innerHTML=""; (footNodes||[]).forEach(n=>f.appendChild(n));
+  f.classList.toggle("hide", !(footNodes&&footNodes.length));
+  $("#scrim").classList.add("on"); $("#sheet").classList.add("on");
+}
+function closeSheet(){ $("#scrim").classList.remove("on"); $("#sheet").classList.remove("on"); }
+$("#scrim").onclick=closeSheet; $("#shClose").onclick=closeSheet;
+function btn(label,cls,fn){ const b=el("button","btn "+cls,esc(label)); b.onclick=fn; return b; }
+function field(label,node,hint){ const w=el("div","f"); w.appendChild(el("label",null,esc(label))); w.appendChild(node); if(hint)w.appendChild(el("div","hint",esc(hint))); return w; }
+function input(type,val,ph){ const i=el("input"); i.type=type; if(val!=null)i.value=val; if(ph)i.placeholder=ph; return i; }
+function textarea(val,ph){ const t=el("textarea"); if(val)t.value=val; if(ph)t.placeholder=ph; return t; }
+function selectEl(options,val,emptyLabel){
+  const s=el("select");
+  if(emptyLabel!==null) s.appendChild(new Option(emptyLabel||"— selecione —",""));
+  options.forEach(o=>s.appendChild(new Option(o.label,o.value)));
+  if(val!=null) s.value=val;
+  return s;
+}
+function chipGroup(options,val){
+  const w=el("div","chips"); let cur=val;
+  options.forEach(o=>{
+    const c=el("button","chip"+(o===cur?" on":""),esc(o)); c.type="button";
+    c.onclick=()=>{ cur=(cur===o?null:o); w.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x.textContent===cur)); };
+    w.appendChild(c);
+  });
+  w.value=()=>cur; return w;
+}
+function errBox(){ return el("div","err hide"); }
+function showErr(b,m){ b.textContent=m; b.classList.remove("hide"); b.scrollIntoView({block:"nearest"}); }
+function confirmDel(title,msg,fn){ const w=el("div"); w.appendChild(el("p",null,esc(msg))); openSheet(title,w,[btn("Cancelar","sec",closeSheet),btn("Excluir","dng",fn)]); }
+async function saveCfg(patch){ S.config=Object.assign({id:"app"},S.config,patch); await put("config",S.config); }
+
+/* ============ fotos ============ */
+function pickPhoto(){
+  return new Promise(res=>{
+    const f=document.createElement("input");
+    f.type="file"; f.accept="image/*"; f.capture="environment";
+    f.onchange=async()=>{ const file=f.files[0]; res(file? await comprimir(file) : null); };
+    f.click();
+  });
+}
+function comprimir(file){
+  return new Promise(res=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const MAX=1600;
+      let {width:w,height:h}=img;
+      if(Math.max(w,h)>MAX){ const k=MAX/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      c.toBlob(b=>{ URL.revokeObjectURL(url); res(b||file); },"image/jpeg",.82);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); res(file); };
+    img.src=url;
+  });
+}
+function imgFrom(blob,cls){ const i=el("img",cls); i.src=URL.createObjectURL(blob); i.onload=()=>{}; return i; }
+
+/* ============ gravacao ============ */
+let rec=null, chunks=[], recStart=0, recTimer=null, recMime="";
+function micSuportado(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+
+async function toggleRec(){
+  if(rec && rec.state==="recording"){ rec.stop(); return; }
+  if(!micSuportado()){ toast("Este navegador não permite gravar áudio aqui."); return; }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    chunks=[];
+    recMime = ["audio/webm;codecs=opus","audio/webm","audio/mp4"].find(m=>window.MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m)) || "";
+    rec = new MediaRecorder(stream, recMime? {mimeType:recMime, audioBitsPerSecond:24000} : {});
+    rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach(t=>t.stop());
+      clearInterval(recTimer); recTimer=null;
+      const dur=Math.max(1,Math.round((Date.now()-recStart)/1000));
+      const blob=new Blob(chunks,{type:recMime||"audio/webm"});
+      rec=null;
+      if(blob.size<400){ render(); toast("Gravação muito curta, descartada."); return; }
+      const g={ id:uid(), blob, dur, tipoMime:blob.type, data:todayISO(), hora:nowHM(),
+                status:"pendente", areaId:null, criadoEm:new Date().toISOString() };
+      await put("gravacoes",g); S.gravacoes.push(g);
+      render(); toast("Guardado · "+fmtDur(dur)+" — fica em Gravações até ser processado");
+    };
+    rec.start();
+    recStart=Date.now();
+    render();
+    recTimer=setInterval(()=>{ const t=$("#micTime"); if(t) t.textContent=fmtDur(Math.round((Date.now()-recStart)/1000)); },250);
+  }catch(e){
+    console.error(e);
+    toast("Não consegui usar o microfone. Verifique a permissão do navegador.");
+  }
+}
+
+let audioAtual=null, audioId=null;
+function tocar(g,botao){
+  if(audioAtual){ audioAtual.pause(); audioAtual=null; document.querySelectorAll(".play.on").forEach(b=>{b.classList.remove("on");b.innerHTML="&#9654;";}); if(audioId===g.id){ audioId=null; return; } }
+  const a=new Audio(URL.createObjectURL(g.blob));
+  audioAtual=a; audioId=g.id;
+  botao.classList.add("on"); botao.innerHTML="&#9724;";
+  a.onended=()=>{ botao.classList.remove("on"); botao.innerHTML="&#9654;"; audioAtual=null; audioId=null; };
+  a.play().catch(()=>{ toast("Não consegui tocar o áudio."); botao.classList.remove("on"); botao.innerHTML="&#9654;"; });
+}
+
+/* ============ formularios ============ */
+function areaOptions(){ return S.areas.map(a=>({label:a.nome,value:a.id})); }
+const defArea = pre => (pre&&pre.areaId) || S.config.ultimaArea || (S.areas.length===1?S.areas[0].id:"");
+
+function needAreas(){
+  if(S.areas.length) return false;
+  const w=el("div");
+  w.appendChild(el("p",null,"Você ainda não tem nenhuma área cadastrada. Quando a transcrição por voz estiver pronta, elas vão se criar sozinhas conforme você fala. Por enquanto, cadastre na mão."));
+  openSheet("Cadastre uma área primeiro", w, [btn("Cadastrar área","pri",()=>formArea())]);
+  return true;
+}
+
+function formIrrigacao(pre){
+  if(needAreas()) return; pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre)), fData=input("date",pre.data||todayISO()), fHora=input("time",pre.hora||nowHM());
+  const fMet=chipGroup(METODOS,pre.metodo||S.config.ultimoMetodo||null);
+  const fDur=input("number",pre.duracao||"","minutos"), fVol=input("number","","litros"), fObs=textarea("","opcional");
+  w.appendChild(field("Área",fArea));
+  const t1=el("div","two"); t1.appendChild(field("Data",fData)); t1.appendChild(field("Hora",fHora)); w.appendChild(t1);
+  w.appendChild(field("Método",fMet));
+  const t2=el("div","two"); t2.appendChild(field("Duração (min)",fDur)); t2.appendChild(field("Volume (L)",fVol)); w.appendChild(t2);
+  w.appendChild(field("Observação",fObs));
+  openSheet("Registrar irrigação",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fArea.value) return showErr(eb,"Escolha a área.");
+    const r={id:uid(),tipo:"irrigacao",areaId:fArea.value,data:fData.value||todayISO(),hora:fHora.value,
+             metodo:fMet.value(),duracao:num(fDur.value),volume:num(fVol.value),obs:fObs.value.trim(),
+             gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+    await salvarRegistro(r,pre); toast("Irrigação registrada");
+  })]);
+}
+
+function formInsumo(pre){
+  if(needAreas()) return; pre=pre||{};
+  if(!S.insumos.length){
+    const w=el("div"); w.appendChild(el("p",null,"Cadastre o insumo uma vez — nome, unidade e a carência, se souber. Depois ele fica pronto pra sempre."));
+    openSheet("Cadastre um insumo primeiro",w,[btn("Cadastrar insumo","pri",()=>formCadInsumo(null,()=>formInsumo(pre)))]); return;
+  }
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre)), fIns=selectEl(S.insumos.map(i=>({label:i.nome,value:i.id})),"");
+  const fQtd=input("number","","quantidade"), fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),"",null);
+  const fForma=chipGroup(FORMAS,null), fData=input("date",pre.data||todayISO()), fObs=textarea("","opcional");
+  fIns.onchange=()=>{ const i=insumoById(fIns.value); if(i&&i.unidade) fUni.value=i.unidade; };
+  w.appendChild(field("Área",fArea));
+  const fi=el("div"); fi.appendChild(field("Insumo",fIns));
+  const nv=el("button","linkbtn","+ Cadastrar novo insumo"); nv.onclick=()=>formCadInsumo(null,()=>formInsumo(pre)); fi.appendChild(nv); w.appendChild(fi);
+  const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
+  w.appendChild(field("Forma de aplicação",fForma));
+  w.appendChild(field("Data",fData));
+  w.appendChild(field("Observação",fObs));
+  openSheet("Registrar insumo",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fArea.value) return showErr(eb,"Escolha a área.");
+    if(!fIns.value) return showErr(eb,"Escolha o insumo.");
+    const r={id:uid(),tipo:"insumo",areaId:fArea.value,insumoId:fIns.value,quantidade:num(fQtd.value),unidade:fUni.value,
+             forma:fForma.value(),data:fData.value||todayISO(),hora:pre.hora||nowHM(),obs:fObs.value.trim(),
+             gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+    await salvarRegistro(r,pre);
+    const i=insumoById(r.insumoId);
+    if(i&&i.carencia) toast("Registrado. Carência de "+i.carencia+" dias: não colher antes de "+fmtDay(new Date(dayStart(r.data)+i.carencia*MS_DAY).toISOString().slice(0,10)));
+    else toast("Insumo registrado");
+  })]);
+}
+
+function formPlantio(pre){
+  if(needAreas()) return; pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre)), fCult=input("text","","ex: alface, jaca, tomate"), fVar=input("text","","opcional");
+  const fData=input("date",pre.data||todayISO()), fQtd=input("number","","nº de mudas"), fCol=input("date",""), fObs=textarea("","opcional");
+  w.appendChild(field("Área",fArea)); w.appendChild(field("Cultura",fCult)); w.appendChild(field("Variedade",fVar));
+  const t=el("div","two"); t.appendChild(field("Data do plantio",fData)); t.appendChild(field("Quantidade",fQtd)); w.appendChild(t);
+  w.appendChild(field("Previsão de colheita",fCol,"Pode deixar em branco."));
+  w.appendChild(field("Observação",fObs));
+  openSheet("Registrar plantio",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fArea.value) return showErr(eb,"Escolha a área.");
+    if(!fCult.value.trim()) return showErr(eb,"Diga o que foi plantado.");
+    const p={id:uid(),areaId:fArea.value,cultura:fCult.value.trim(),variedade:fVar.value.trim(),
+             dataPlantio:fData.value||todayISO(),quantidade:num(fQtd.value),previsao:fCol.value||null,
+             status:"ativo",obs:fObs.value.trim(),criadoEm:new Date().toISOString()};
+    await put("plantios",p); S.plantios.push(p);
+    const r={id:uid(),tipo:"plantio",areaId:p.areaId,plantioId:p.id,cultura:p.cultura,variedade:p.variedade,
+             quantidade:p.quantidade,data:p.dataPlantio,hora:pre.hora||nowHM(),obs:p.obs,
+             gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+    await salvarRegistro(r,pre); toast("Plantio registrado");
+  })]);
+}
+
+function formColheita(pre){
+  if(needAreas()) return; pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre)), fQtd=input("number","","quantidade");
+  const fUni=selectEl(UNIDADES.map(u=>({label:u,value:u})),"kg",null), fData=input("date",pre.data||todayISO()), fObs=textarea("","opcional");
+  w.appendChild(field("Área",fArea));
+  const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
+  w.appendChild(field("Data",fData)); w.appendChild(field("Observação",fObs));
+  openSheet("Registrar colheita",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fArea.value) return showErr(eb,"Escolha a área.");
+    const r={id:uid(),tipo:"colheita",areaId:fArea.value,quantidade:num(fQtd.value),unidade:fUni.value,
+             data:fData.value||todayISO(),hora:pre.hora||nowHM(),obs:fObs.value.trim(),
+             gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+    await salvarRegistro(r,pre); toast("Colheita registrada");
+  })]);
+}
+
+function formObs(pre){
+  pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre),"— sem área —");
+  const fData=input("date",pre.data||todayISO());
+  const fTxt=textarea("","O que você viu? ex: folhas amareladas na ponta da linha 3");
+  let foto=pre.foto||null;
+  const fotoWrap=el("div");
+  const fb=el("button","photobtn","&#128247; Tirar ou escolher foto"); fb.style.marginTop="0";
+  const prev=el("div");
+  const mostrar=()=>{ prev.innerHTML=""; if(foto){ prev.appendChild(imgFrom(foto,"photoprev"));
+      const rm=el("button","linkbtn","Remover foto"); rm.onclick=()=>{foto=null;mostrar();}; prev.appendChild(rm); } };
+  fb.onclick=async()=>{ const b=await pickPhoto(); if(b){ foto=b; mostrar(); } };
+  fotoWrap.appendChild(fb); fotoWrap.appendChild(prev); mostrar();
+  if(foto) mostrar();
+
+  w.appendChild(field("Área",fArea));
+  w.appendChild(field("Data",fData));
+  w.appendChild(field("Observação",fTxt));
+  w.appendChild(field("Foto",fotoWrap,"A foto fica guardada com a data e a área. Com o tempo vira uma linha do tempo visual pro agente analisar."));
+
+  openSheet("Anotar observação",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fTxt.value.trim() && !foto) return showErr(eb,"Escreva algo ou anexe uma foto.");
+    const r={id:uid(),tipo:"observacao",areaId:fArea.value||null,data:fData.value||todayISO(),hora:pre.hora||nowHM(),
+             obs:fTxt.value.trim(),foto:foto||null,gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+    await salvarRegistro(r,pre); toast("Observação salva");
+  })]);
+}
+
+async function salvarRegistro(r,pre){
+  await put("registros",r); S.registros.push(r);
+  if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo||S.config.ultimoMetodo});
+  if(pre && pre.gravacaoId){
+    const g=S.gravacoes.find(x=>x.id===pre.gravacaoId);
+    if(g){ g.status="processada"; g.areaId=r.areaId||null; await put("gravacoes",g); }
+  }
+  closeSheet(); render();
+}
+
+/* ============ cadastros ============ */
+function formArea(existing,then){
+  const a=existing||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fNome=input("text",a.nome||"","ex: Estufa 1");
+  const fTipo=chipGroup(TIPOS_AREA,a.tipo||null);
+  const fFreq=input("number",a.frequencia||"","ex: 3");
+  const fApel=input("text",(a.apelidos||[]).join(", "),"ex: estufa um, estufa de cima");
+  const fObs=textarea(a.obs||"","opcional");
+  w.appendChild(field("Nome",fNome));
+  w.appendChild(field("Tipo",fTipo));
+  w.appendChild(field("Irrigar a cada quantos dias?",fFreq,"É isso que faz a plantinha da tela inicial ficar vermelha quando atrasa. Deixe em branco se você irriga por observação, não por calendário."));
+  w.appendChild(field("Como você fala",fApel,"Separe por vírgula. Vai servir pro comando de voz reconhecer a área."));
+  w.appendChild(field("Observação",fObs));
+  const foot=[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fNome.value.trim()) return showErr(eb,"Dê um nome pra área.");
+    const o={id:a.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),frequencia:num(fFreq.value),
+             apelidos:fApel.value.split(",").map(s=>s.trim()).filter(Boolean),obs:fObs.value.trim(),
+             criadoEm:a.criadoEm||new Date().toISOString()};
+    await put("areas",o);
+    const ix=S.areas.findIndex(x=>x.id===o.id); if(ix>=0)S.areas[ix]=o; else S.areas.push(o);
+    closeSheet(); render(); toast(existing?"Área atualizada":"Área cadastrada"); if(then)then(o);
+  })];
+  if(existing) foot.unshift(btn("Excluir","dng",()=>confirmDel("Excluir \""+a.nome+"\"?","Os registros dela continuam no diário.",async()=>{
+    await del("areas",a.id); S.areas=S.areas.filter(x=>x.id!==a.id); closeSheet(); go("mais"); toast("Área excluída");
+  })));
+  openSheet(existing?"Editar área":"Nova área",w,foot);
+}
+
+function formCadInsumo(existing,then){
+  const i=existing||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fNome=input("text",i.nome||"","ex: Chorume, Bokashi");
+  const fTipo=chipGroup(TIPOS_INS,i.tipo||null);
+  const fUni=chipGroup(UNIDADES,i.unidade||null);
+  const fCar=input("number",i.carencia||"","dias");
+  const fObs=textarea(i.obs||"","dose de referência, bula, onde compra…");
+  w.appendChild(field("Nome",fNome)); w.appendChild(field("Tipo",fTipo)); w.appendChild(field("Unidade padrão",fUni));
+  w.appendChild(field("Carência (dias)",fCar,"Quantos dias esperar entre aplicar e colher. O app te avisa."));
+  w.appendChild(field("Observação",fObs));
+  const foot=[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fNome.value.trim()) return showErr(eb,"Dê um nome ao insumo.");
+    const o={id:i.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),unidade:fUni.value(),
+             carencia:num(fCar.value),obs:fObs.value.trim(),criadoEm:i.criadoEm||new Date().toISOString()};
+    await put("insumos",o);
+    const ix=S.insumos.findIndex(x=>x.id===o.id); if(ix>=0)S.insumos[ix]=o; else S.insumos.push(o);
+    closeSheet(); render(); toast(existing?"Insumo atualizado":"Insumo cadastrado"); if(then)then(o);
+  })];
+  if(existing) foot.unshift(btn("Excluir","dng",()=>confirmDel("Excluir \""+i.nome+"\"?","Os registros continuam no diário.",async()=>{
+    await del("insumos",i.id); S.insumos=S.insumos.filter(x=>x.id!==i.id); closeSheet(); screenInsumos(); toast("Insumo excluído");
+  })));
+  openSheet(existing?"Editar insumo":"Novo insumo",w,foot);
+}
+
+/* ============ navegacao ============ */
+let tab="home", stack=null;
+function go(t){ tab=t; stack=null; render(); window.scrollTo(0,0); }
+$("#backBtn").onclick=()=>{ stack=null; render(); };
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
+  go(b.dataset.tab);
+});
+function head(t,s){ $("#hdTitle").childNodes[0].nodeValue=t; $("#hdSub").textContent=s||""; }
+function navBadge(){
+  const b=document.querySelector('nav button[data-tab=pend]');
+  const old=b.querySelector(".badge"); if(old) old.remove();
+  const n=pendentes().length; if(n) b.appendChild(el("span","badge",String(n)));
+}
+
+function render(){
+  const v=$("#view"); v.innerHTML="";
+  $("#backBtn").classList.toggle("hide",!stack);
+  navBadge();
+  if(stack && stack.tipo==="area") return screenAreaDetalhe(stack.id);
+  if(tab==="home") return screenHome();
+  if(tab==="pend") return screenPendentes();
+  if(tab==="diario") return screenDiario();
+  if(tab==="mais") return screenMais();
+}
+
+/* ============ INÍCIO ============ */
+function screenHome(){
+  head("Caderno de Campo", new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"}));
+  const v=$("#view");
+  const gravando = !!(rec && rec.state==="recording");
+  const st=statusGeral();
+
+  const h=el("div","home");
+  h.innerHTML = plantaSVG(st.nivel);
+  h.appendChild(el("div","st-t "+st.nivel, esc(st.t)));
+  h.appendChild(el("div","st-s", esc(st.s)));
+
+  const mw=el("div","micwrap");
+  const m=el("button","mic"+(gravando?" rec":""));
+  m.innerHTML = gravando
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="2.5" width="6" height="11" rx="3" fill="currentColor" stroke="none"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.5"/></svg>';
+  m.onclick=toggleRec;
+  mw.appendChild(m);
+  const lb=el("div","miclb");
+  if(gravando){ lb.innerHTML='Gravando <span id="micTime" class="mictime">0:00</span> · toque para parar'; }
+  else lb.textContent="Toque e fale o que você fez";
+  mw.appendChild(lb);
+  h.appendChild(mw);
+
+  const np=pendentes().length;
+  if(np){
+    const p=el("button","pend", np===1? "1 gravação esperando" : np+" gravações esperando");
+    p.onclick=()=>{ document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.tab==="pend")); go("pend"); };
+    h.appendChild(p);
+  }
+
+  const fb=el("button","photobtn","&#128247; Foto e observação");
+  fb.onclick=()=>formObs();
+  h.appendChild(fb);
+
+  if(!micSuportado()){
+    const a=el("div","empty"); a.style.marginTop="26px"; a.style.fontSize="14px";
+    a.innerHTML="<b>O microfone não está disponível aqui.</b><br>Isso acontece quando o app é aberto direto de um arquivo. Quando estiver hospedado num endereço https, a gravação funciona.";
+    h.appendChild(a);
+  }
+  v.appendChild(h);
+}
+
+/* ============ GRAVAÇÕES ============ */
+function screenPendentes(){
+  head("Gravações","");
+  const v=$("#view");
+  const list=pendentes();
+  const info=el("div","empty");
+  info.style.textAlign="left"; info.style.fontSize="14px"; info.style.marginBottom="18px";
+  info.innerHTML="<b>Estas gravações ainda não foram entendidas pelo app.</b> Quando a transcrição automática estiver pronta (próxima etapa), elas viram registros sozinhas no wifi. Por enquanto você pode ouvir e preencher no dedo.";
+  v.appendChild(info);
+
+  if(!list.length){ v.appendChild(el("div","empty","Nenhuma gravação esperando.")); }
+  else{
+    const c=el("div","card");
+    list.forEach(g=>{
+      const box=el("div","grav");
+      const top=el("div","grav-top");
+      const pb=el("button","play","&#9654;"); pb.onclick=()=>tocar(g,pb);
+      top.appendChild(pb);
+      const bd=el("div","bd");
+      bd.appendChild(el("div","t1", fmtDay(g.data)+" · "+g.hora));
+      bd.appendChild(el("div","t2", fmtDur(g.dur)+" · "+Math.round(g.blob.size/1024)+" KB"));
+      top.appendChild(bd);
+      box.appendChild(top);
+      const acts=el("div","grav-acts");
+      const pr=el("button","mini","Preencher no dedo");
+      pr.onclick=()=>escolherTipo({gravacaoId:g.id, data:g.data, hora:g.hora});
+      const rm=el("button","mini d","Apagar");
+      rm.onclick=()=>confirmDel("Apagar esta gravação?","O áudio será perdido.", async()=>{
+        await del("gravacoes",g.id); S.gravacoes=S.gravacoes.filter(x=>x.id!==g.id); closeSheet(); render(); toast("Gravação apagada");
+      });
+      acts.appendChild(pr); acts.appendChild(rm);
+      box.appendChild(acts);
+      c.appendChild(box);
+    });
+    v.appendChild(c);
+  }
+
+  const proc=S.gravacoes.filter(g=>g.status==="processada");
+  if(proc.length){
+    const s=el("div","sec"); s.style.marginTop="22px";
+    s.appendChild(el("div","sec-t","Já viraram registro ("+proc.length+")"));
+    const c=el("div","card");
+    proc.sort((a,b)=>(b.data+b.hora).localeCompare(a.data+a.hora)).slice(0,20).forEach(g=>{
+      const box=el("div","grav"); const top=el("div","grav-top");
+      const pb=el("button","play","&#9654;"); pb.style.background="#8A9585"; pb.onclick=()=>tocar(g,pb);
+      top.appendChild(pb);
+      const bd=el("div","bd");
+      bd.appendChild(el("div","t1", fmtDay(g.data)+" · "+g.hora));
+      bd.appendChild(el("div","t2", fmtDur(g.dur)));
+      top.appendChild(bd); box.appendChild(top); c.appendChild(box);
+    });
+    s.appendChild(c); v.appendChild(s);
+  }
+}
+
+function escolherTipo(pre){
+  const w=el("div"); const c=el("div","card");
+  const it=(ic,lb,fn)=>{ const b=el("button","menu-item"); b.appendChild(el("span","ic",ic));
+    const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t); b.onclick=fn; return b; };
+  c.appendChild(it("&#128167;","Irrigação",()=>formIrrigacao(pre)));
+  c.appendChild(it("&#129524;","Insumo",()=>formInsumo(pre)));
+  c.appendChild(it("&#127793;","Plantio",()=>formPlantio(pre)));
+  c.appendChild(it("&#127807;","Colheita",()=>formColheita(pre)));
+  c.appendChild(it("&#128221;","Observação",()=>formObs(pre)));
+  w.appendChild(c);
+  openSheet("O que foi isso?",w,[btn("Cancelar","sec",closeSheet)]);
+}
+
+/* ============ DIÁRIO ============ */
+let filtroTipo=null, filtroArea="", busca="";
+function screenDiario(){
+  head("Diário","");
+  const v=$("#view"); v.innerHTML="";
+  const f=el("div","sec");
+  const fb=input("text",busca,"Buscar no diário…"); fb.style.marginBottom="12px";
+  fb.oninput=()=>{ busca=fb.value; lista(); };
+  f.appendChild(fb);
+  const chips=el("div","chips"); chips.style.marginBottom="12px";
+  ["irrigacao","insumo","plantio","colheita","observacao"].forEach(t=>{
+    const c=el("button","chip"+(filtroTipo===t?" on":""),esc(TIPO_LB[t]));
+    c.onclick=()=>{ filtroTipo=filtroTipo===t?null:t; render(); };
+    chips.appendChild(c);
+  });
+  f.appendChild(chips);
+  if(S.areas.length){
+    const sa=selectEl(areaOptions(),filtroArea,"Todas as áreas");
+    sa.onchange=()=>{ filtroArea=sa.value; lista(); };
+    f.appendChild(sa);
+  }
+  v.appendChild(f);
+  const holder=el("div"); v.appendChild(holder);
+  function lista(){
+    holder.innerHTML="";
+    const q=busca.trim().toLowerCase();
+    let L=sortedRegs();
+    if(filtroTipo) L=L.filter(r=>r.tipo===filtroTipo);
+    if(filtroArea) L=L.filter(r=>r.areaId===filtroArea);
+    if(q) L=L.filter(r=>{ const a=r.areaId?areaById(r.areaId):null;
+      return ((r.obs||"")+" "+descRegistro(r)+" "+(a?a.nome:"")+" "+TIPO_LB[r.tipo]).toLowerCase().includes(q); });
+    if(!L.length){ holder.appendChild(el("div","empty", S.registros.length?"Nada encontrado com esses filtros.":"Seu diário está vazio.<br>Grave algo na tela inicial.")); return; }
+    holder.appendChild(grouped(L,true));
+  }
+  lista();
+}
+
+function rowRegistro(r,showArea){
+  const a=r.areaId?areaById(r.areaId):null;
+  const b=el("button","row");
+  if(r.foto) b.appendChild(imgFrom(r.foto,"thumb"));
+  else b.appendChild(el("div","dot d-"+r.tipo));
+  const bd=el("div","bd");
+  bd.appendChild(el("div","t1", esc(TIPO_LB[r.tipo])+(showArea&&a?" · "+esc(a.nome):"")));
+  const d=descRegistro(r); if(d) bd.appendChild(el("div","t2",esc(d)));
+  b.appendChild(bd);
+  b.appendChild(el("div","rt",esc(r.hora||"")));
+  b.onclick=()=>verRegistro(r);
+  return b;
+}
+function grouped(list,showArea){
+  const wrap=el("div"); let cur=null,card=null;
+  list.forEach(r=>{
+    if(r.data!==cur){ cur=r.data; const g=el("div","daygrp");
+      g.appendChild(el("div","dayhd",esc(fmtDay(r.data)))); card=el("div","card"); g.appendChild(card); wrap.appendChild(g); }
+    card.appendChild(rowRegistro(r,showArea));
+  });
+  return wrap;
+}
+function verRegistro(r){
+  const a=r.areaId?areaById(r.areaId):null;
+  const w=el("div"); const c=el("div","card"); c.style.padding="4px 16px";
+  const kv=(k,val)=>{ if(val==null||val==="")return; const d=el("div","kv");
+    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
+  kv("Tipo",TIPO_LB[r.tipo]); kv("Área",a?a.nome:"—"); kv("Data",fmtDay(r.data)); kv("Hora",r.hora);
+  if(r.tipo==="irrigacao"){ kv("Método",r.metodo); kv("Duração",r.duracao?r.duracao+" min":null); kv("Volume",r.volume?fmtNum(r.volume)+" L":null); }
+  if(r.tipo==="insumo"){ const i=insumoById(r.insumoId); kv("Insumo",i?i.nome:null);
+    kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); kv("Forma",r.forma);
+    if(i&&i.carencia) kv("Colher a partir de",fmtDay(new Date(dayStart(r.data)+i.carencia*MS_DAY).toISOString().slice(0,10))); }
+  if(r.tipo==="plantio"){ kv("Cultura",r.cultura); kv("Variedade",r.variedade); kv("Quantidade",r.quantidade); }
+  if(r.tipo==="colheita"){ kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); }
+  kv("Observação",r.obs);
+  w.appendChild(c);
+  if(r.foto) w.appendChild(imgFrom(r.foto,"photoprev"));
+  if(r.gravacaoId){
+    const g=S.gravacoes.find(x=>x.id===r.gravacaoId);
+    if(g){ const box=el("div","grav"); box.style.marginTop="12px"; box.style.background="var(--card)";
+      box.style.border="1px solid var(--line)"; box.style.borderRadius="var(--r)";
+      const top=el("div","grav-top"); const pb=el("button","play","&#9654;"); pb.onclick=()=>tocar(g,pb);
+      top.appendChild(pb); const bd=el("div","bd");
+      bd.appendChild(el("div","t1","Áudio original")); bd.appendChild(el("div","t2",fmtDur(g.dur)));
+      top.appendChild(bd); box.appendChild(top); w.appendChild(box); }
+  }
+  openSheet(TIPO_LB[r.tipo],w,[btn("Fechar","sec",closeSheet),
+    btn("Excluir","dng",()=>confirmDel("Excluir este registro?","Não dá pra desfazer.",async()=>{
+      await del("registros",r.id); S.registros=S.registros.filter(x=>x.id!==r.id); closeSheet(); render(); toast("Registro excluído");
+    }))]);
+}
+
+/* ============ ÁREAS ============ */
+function cardArea(a){
+  const b=el("button","acard");
+  const bd=el("div","bd");
+  bd.appendChild(el("div","nm",esc(a.nome)));
+  const ps=plantiosAtivos(a.id);
+  bd.appendChild(el("div","mt", esc(ps.length? ps.map(p=>p.cultura).join(", ") : (a.tipo||"sem plantio ativo"))));
+  b.appendChild(bd);
+  const ui=ultimaIrrigacao(a.id);
+  let cls="neutral", txt="sem irrigação";
+  if(ui){ const n=daysAgo(ui); txt=n===0?"irrigada hoje":n===1?"irrigada ontem":"há "+n+" dias";
+    if(a.frequencia) cls = n>a.frequencia?"bad": n===a.frequencia?"warn":"ok";
+    else cls = n<=2?"ok":n<=5?"warn":"bad"; }
+  b.appendChild(el("div","pill "+cls,esc(txt)));
+  b.onclick=()=>{ stack={tipo:"area",id:a.id}; render(); window.scrollTo(0,0); };
+  return b;
+}
+function screenAreas(){
+  head("Áreas",""); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  if(!S.areas.length) v.appendChild(el("div","empty","Nenhuma área cadastrada ainda."));
+  else{ const c=el("div","card"); S.areas.forEach(a=>c.appendChild(cardArea(a))); v.appendChild(c); }
+  const b=btn("+ Nova área","pri",()=>formArea()); b.style.marginTop="16px"; v.appendChild(b);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+function screenAreaDetalhe(id){
+  const a=areaById(id); if(!a){ stack=null; return render(); }
+  head(a.nome,a.tipo||"");
+  const v=$("#view");
+  const hd=el("div","card"); hd.style.padding="4px 16px"; hd.style.marginBottom="18px";
+  const kv=(k,val)=>{ const d=el("div","kv"); d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); hd.appendChild(d); };
+  const ui=ultimaIrrigacao(a.id);
+  kv("Última irrigação", ui?fmtAgo(ui):"nenhuma registrada");
+  if(a.frequencia){
+    const atraso = ui? daysAgo(ui)-a.frequencia : null;
+    kv("Combinado","a cada "+a.frequencia+" dias");
+    kv("Situação", atraso==null?"sem registro": atraso>0?("atrasada "+atraso+(atraso===1?" dia":" dias")): atraso===0?"vence hoje":"em dia");
+  }
+  const ps=plantiosAtivos(a.id);
+  kv("Plantio ativo", ps.length? ps.map(p=>p.cultura+" ("+daysAgo(p.dataPlantio)+" dias)").join(", "):"nenhum");
+  const rs=S.registros.filter(r=>r.areaId===a.id);
+  kv("Registros",rs.length);
+  if(a.apelidos&&a.apelidos.length) kv("Apelidos",a.apelidos.join(", "));
+  if(a.obs) kv("Observação",a.obs);
+  v.appendChild(hd);
+
+  const fotos=rs.filter(r=>r.foto).sort((x,y)=>y.data.localeCompare(x.data));
+  if(fotos.length){
+    const s=el("div","sec"); s.appendChild(el("div","sec-t","Linha do tempo visual"));
+    const strip=el("div"); strip.style.cssText="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px";
+    fotos.slice(0,20).forEach(r=>{
+      const b=el("button"); b.style.cssText="flex:0 0 auto;text-align:center";
+      const i=imgFrom(r.foto); i.style.cssText="width:104px;height:104px;object-fit:cover;border-radius:12px;display:block";
+      b.appendChild(i); b.appendChild(el("div",null,esc(fmtDay(r.data)))).style.cssText="font-size:12.5px;color:var(--ink2);margin-top:5px";
+      b.onclick=()=>verRegistro(r); strip.appendChild(b);
+    });
+    s.appendChild(strip); v.appendChild(s);
+  }
+
+  const s=el("div","sec"); s.appendChild(el("div","sec-t","Histórico desta área"));
+  const L=rs.sort((x,y)=>(y.data+(y.hora||"")).localeCompare(x.data+(x.hora||"")));
+  if(L.length) s.appendChild(grouped(L,false)); else s.appendChild(el("div","empty","Nenhum registro nesta área ainda."));
+  v.appendChild(s);
+  const eb=btn("Editar área","sec",()=>formArea(a)); eb.style.flex="1"; v.appendChild(eb);
+}
+
+/* ============ MAIS ============ */
+function screenMais(){
+  head("Mais","");
+  const v=$("#view");
+  const item=(ic,lb,ch,fn)=>{ const b=el("button","menu-item"); b.appendChild(el("span","ic",ic));
+    const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t);
+    b.appendChild(el("span","ch",esc(ch||""))); b.onclick=fn; return b; };
+
+  const c=el("div","card");
+  c.appendChild(item("&#127795;","Áreas",S.areas.length+"",screenAreas));
+  c.appendChild(item("&#129524;","Insumos",S.insumos.length+"",screenInsumos));
+  c.appendChild(item("&#127793;","Plantios",S.plantios.filter(p=>p.status!=="encerrado").length+" ativos",screenPlantios));
+  v.appendChild(c);
+
+  const c2=el("div","card"); c2.style.marginTop="18px";
+  c2.appendChild(item("&#9997;","Registrar sem falar","",()=>escolherTipo({})));
+  v.appendChild(c2);
+
+  const c3=el("div","card"); c3.style.marginTop="18px";
+  c3.appendChild(item("&#128190;","Exportar backup","",exportar));
+  c3.appendChild(item("&#128228;","Importar backup","",importar));
+  c3.appendChild(item("&#129514;","Carregar dados de exemplo","",exemplos));
+  c3.appendChild(item("&#128465;","Apagar tudo","",apagarTudo));
+  v.appendChild(c3);
+
+  const info=el("div","empty");
+  info.style.cssText="margin-top:18px;text-align:left;font-size:14px";
+  const mb=(S.gravacoes.reduce((s,g)=>s+(g.blob?g.blob.size:0),0)+S.registros.reduce((s,r)=>s+(r.foto?r.foto.size:0),0))/1048576;
+  info.innerHTML="<b>Etapas 1 e 2.</b> Tudo fica dentro deste aparelho e funciona sem internet. "+
+    "Transcrever a voz, entender o que você falou, regras automáticas, avisos e o agente agrônomo vêm nas próximas etapas.<br><br>"+
+    "Áudios e fotos ocupam <b>"+mb.toFixed(1)+" MB</b>.<br><br>"+
+    "<b>Faça backup de vez em quando.</b> Enquanto a nuvem não existe, o arquivo de backup é a sua única cópia — mas ele não leva áudios nem fotos, só os registros.";
+  v.appendChild(info);
+}
+
+function screenInsumos(){
+  head("Insumos",""); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  if(!S.insumos.length) v.appendChild(el("div","empty","Nenhum insumo cadastrado."));
+  else{
+    const c=el("div","card");
+    S.insumos.forEach(i=>{
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(i.nome)));
+      bd.appendChild(el("div","mt",esc([i.tipo,i.unidade?"em "+i.unidade:null,i.carencia?"carência "+i.carencia+" dias":null].filter(Boolean).join(" · ")||"—")));
+      b.appendChild(bd);
+      b.appendChild(el("div","pill neutral",S.registros.filter(r=>r.insumoId===i.id).length+"×"));
+      b.onclick=()=>formCadInsumo(i); c.appendChild(b);
+    });
+    v.appendChild(c);
+  }
+  const b=btn("+ Novo insumo","pri",()=>formCadInsumo()); b.style.marginTop="16px"; v.appendChild(b);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+
+function screenPlantios(){
+  head("Plantios",""); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  const ativos=S.plantios.filter(p=>p.status!=="encerrado"), fim=S.plantios.filter(p=>p.status==="encerrado");
+  const bloco=(titulo,arr)=>{
+    if(!arr.length) return;
+    const s=el("div","sec"); s.appendChild(el("div","sec-t",titulo)); const c=el("div","card");
+    arr.forEach(p=>{
+      const a=areaById(p.areaId); const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(p.cultura+(p.variedade?" · "+p.variedade:""))));
+      bd.appendChild(el("div","mt",esc((a?a.nome+" · ":"")+"plantado "+fmtAgo(p.dataPlantio))));
+      b.appendChild(bd);
+      if(p.previsao){ const n=daysAgo(p.previsao); b.appendChild(el("div","pill "+(n>=0?"warn":"neutral"), n>=0?"colher!":"em "+(-n)+"d")); }
+      b.onclick=()=>verPlantio(p); c.appendChild(b);
+    });
+    s.appendChild(c); v.appendChild(s);
+  };
+  if(!S.plantios.length) v.appendChild(el("div","empty","Nenhum plantio registrado."));
+  bloco("Ativos",ativos); bloco("Encerrados",fim);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+function verPlantio(p){
+  const a=areaById(p.areaId);
+  const w=el("div"); const c=el("div","card"); c.style.padding="4px 16px";
+  const kv=(k,val)=>{ if(val==null||val==="")return; const d=el("div","kv");
+    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
+  kv("Cultura",p.cultura); kv("Variedade",p.variedade); kv("Área",a?a.nome:"—");
+  kv("Plantado em",fmtDay(p.dataPlantio)+" ("+daysAgo(p.dataPlantio)+" dias)");
+  kv("Quantidade",p.quantidade); kv("Previsão",p.previsao?fmtDay(p.previsao):null);
+  kv("Situação",p.status==="encerrado"?"Encerrado":"Ativo"); kv("Observação",p.obs);
+  w.appendChild(c);
+  const foot=[btn("Fechar","sec",closeSheet)];
+  foot.push(p.status!=="encerrado"
+    ? btn("Encerrar plantio","pri",async()=>{ p.status="encerrado"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio encerrado"); })
+    : btn("Reabrir","pri",async()=>{ p.status="ativo"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio reaberto"); }));
+  openSheet(p.cultura,w,foot);
+}
+
+/* ============ backup ============ */
+function semBlobs(r){ const o=Object.assign({},r); delete o.foto; return o; }
+function exportar(){
+  const data={versao:2,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
+              plantios:S.plantios,registros:S.registros.map(semBlobs),config:S.config};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob); const a=document.createElement("a");
+  a.href=url; a.download="caderno-campo-"+todayISO()+".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),3000);
+  toast("Backup gerado (sem áudios e fotos)");
+}
+function importar(){
+  const f=document.createElement("input"); f.type="file"; f.accept=".json,application/json";
+  f.onchange=async()=>{
+    const file=f.files[0]; if(!file) return;
+    try{
+      const d=JSON.parse(await file.text());
+      if(!d||!Array.isArray(d.registros)) throw new Error("formato");
+      for(const s of ["areas","insumos","plantios","registros"]){
+        await clearStore(s); for(const o of (d[s]||[])) await put(s,o);
+      }
+      if(d.config) await put("config",Object.assign({id:"app"},d.config));
+      await load(); render(); toast("Backup restaurado");
+    }catch(e){ toast("Arquivo inválido"); }
+  };
+  f.click();
+}
+function apagarTudo(){
+  confirmDel("Apagar tudo?","Registros, áreas, insumos, áudios e fotos deste aparelho serão apagados. Exporte um backup antes se quiser guardar.",async()=>{
+    for(const s of STORES) await clearStore(s);
+    await load(); closeSheet(); go("home"); toast("Tudo apagado");
+  });
+}
+async function exemplos(){
+  if(S.areas.length||S.registros.length||S.gravacoes.length)
+    confirmDel("Carregar dados de exemplo?","Isso apaga o que já existe neste aparelho e coloca dados fictícios pra você experimentar.",doIt);
+  else doIt();
+  async function doIt(){
+    for(const s of STORES) await clearStore(s);
+    const d=i=>new Date(Date.now()-i*MS_DAY).toISOString().slice(0,10);
+    const areas=[
+      {id:"a1",nome:"Estufa 1",tipo:"Estufa",frequencia:2,apelidos:["estufa um","estufa de cima"],obs:"",criadoEm:new Date().toISOString()},
+      {id:"a2",nome:"Canteiro 3",tipo:"Canteiro",frequencia:4,apelidos:["canteiro três"],obs:"",criadoEm:new Date().toISOString()},
+      {id:"a3",nome:"Linha 3 — jaqueiras",tipo:"Linha",frequencia:7,apelidos:["linha três","a jaca da linha três"],obs:"",criadoEm:new Date().toISOString()}
+    ];
+    const insumos=[
+      {id:"i1",nome:"Chorume",tipo:"Biofertilizante",unidade:"L",carencia:null,obs:"",criadoEm:new Date().toISOString()},
+      {id:"i2",nome:"Bokashi",tipo:"Adubo",unidade:"kg",carencia:null,obs:"",criadoEm:new Date().toISOString()},
+      {id:"i3",nome:"Calda bordalesa",tipo:"Defensivo",unidade:"L",carencia:7,obs:"",criadoEm:new Date().toISOString()}
+    ];
+    const plantios=[
+      {id:"p1",areaId:"a1",cultura:"Alface",variedade:"Crespa",dataPlantio:d(22),quantidade:120,previsao:d(-18),status:"ativo",obs:"",criadoEm:new Date().toISOString()},
+      {id:"p2",areaId:"a2",cultura:"Tomate",variedade:"Cereja",dataPlantio:d(46),quantidade:40,previsao:d(-25),status:"ativo",obs:"",criadoEm:new Date().toISOString()}
+    ];
+    const R=[]; const add=o=>R.push(Object.assign({id:uid(),hora:"07:30",criadoEm:new Date().toISOString()},o));
+    [0,2,4,6,9,12,15].forEach(n=>add({tipo:"irrigacao",areaId:"a1",data:d(n),metodo:"Gotejo",duracao:30}));
+    [1,5,8,13].forEach(n=>add({tipo:"irrigacao",areaId:"a2",data:d(n),metodo:"Aspersão",duracao:20}));
+    [11].forEach(n=>add({tipo:"irrigacao",areaId:"a3",data:d(n),metodo:"Mangueira",volume:60}));
+    add({tipo:"insumo",areaId:"a3",insumoId:"i1",quantidade:5,unidade:"L",forma:"No solo",data:d(2),obs:"primeira aplicação de chorume"});
+    add({tipo:"insumo",areaId:"a1",insumoId:"i2",quantidade:2,unidade:"kg",forma:"Cobertura",data:d(10)});
+    add({tipo:"insumo",areaId:"a2",insumoId:"i3",quantidade:1.5,unidade:"L",forma:"Foliar",data:d(4),obs:"pintas nas folhas de baixo"});
+    add({tipo:"plantio",areaId:"a1",plantioId:"p1",cultura:"Alface",variedade:"Crespa",quantidade:120,data:d(22)});
+    add({tipo:"plantio",areaId:"a2",plantioId:"p2",cultura:"Tomate",variedade:"Cereja",quantidade:40,data:d(46)});
+    add({tipo:"observacao",areaId:"a3",data:d(1),obs:"jaca da ponta com folha amarelada, as outras normais"});
+    add({tipo:"observacao",areaId:"a1",data:d(7),obs:"muito calor essa semana, solo secando rápido"});
+    add({tipo:"colheita",areaId:"a2",quantidade:6,unidade:"kg",data:d(3),obs:"primeira colhida"});
+    for(const a of areas) await put("areas",a);
+    for(const i of insumos) await put("insumos",i);
+    for(const p of plantios) await put("plantios",p);
+    for(const r of R) await put("registros",r);
+    await put("config",{id:"app",ultimaArea:"a1"});
+    await load(); closeSheet(); go("home"); toast("Dados de exemplo carregados");
+  }
+}
+
+/* ============ boot ============ */
+(async function(){
+  try{ await open(); await load(); render(); }
+  catch(e){
+    $("#view").innerHTML='<div class="empty"><b>Não consegui abrir o banco de dados.</b><br>Se você estiver numa aba anônima, tente numa aba normal.</div>';
+    console.error(e);
+  }
+})();
+window.__app={S,load,render,statusGeral};
+
+if("serviceWorker" in navigator && location.protocol==="https:"){
+  window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
+}
+</script>
+</body>
+</html>
