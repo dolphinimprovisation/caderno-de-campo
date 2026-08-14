@@ -83,6 +83,7 @@ main{padding:16px 16px 8px}
 .row .rt{font-size:13px;color:var(--ink2);white-space:nowrap;padding-top:2px}
 .d-irrigacao{background:var(--blue)} .d-insumo{background:var(--amber)}
 .d-plantio{background:var(--green)} .d-colheita{background:var(--green-d)}
+.d-poda{background:#7A6A3F}
 .d-observacao{background:var(--purple)}
 .thumb{width:44px;height:44px;border-radius:9px;object-fit:cover;flex:0 0 44px;background:#ECEAE4}
 
@@ -262,12 +263,12 @@ function plantiosAtivos(areaId){ return S.plantios.filter(p=>p.areaId===areaId &
 
 /* ============ status geral (a plantinha) ============ */
 function statusGeral(){
-  if(!S.areas.length && !S.registros.length && !S.gravacoes.length)
+  if(!S.registros.length && !S.gravacoes.length)
     return {nivel:"ok", t:"Comece falando", s:"Toque no microfone e diga o que você fez. Depois eu organizo."};
 
   const comFreq = S.areas.filter(a=>a.frequencia>0);
   if(!comFreq.length)
-    return {nivel:"ok", t:"Tudo tranquilo", s:"Pra eu avisar de atraso, defina “irrigar a cada X dias” nas suas áreas."};
+    return {nivel:"ok", t:"Tudo tranquilo", s:"Pra eu avisar de atraso, diga de quantos em quantos dias cada área deve ser regada — em Mais › Áreas."};
 
   const atrasadas=[], nolimite=[], nunca=[];
   comFreq.forEach(a=>{
@@ -314,7 +315,7 @@ function plantaSVG(nivel){
 }
 
 /* ============ rotulos ============ */
-const TIPO_LB={irrigacao:"Irrigação",insumo:"Insumo",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
+const TIPO_LB={irrigacao:"Irrigação",insumo:"Insumo",poda:"Poda",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
 const METODOS=["Gotejo","Aspersão","Microaspersão","Mangueira","Manual"];
 const FORMAS=["Fertirrigação","Foliar","No solo","Cobertura"];
 const TIPOS_AREA=["Estufa","Canteiro","Talhão","Linha","Vaso","Outro"];
@@ -549,16 +550,57 @@ function tocar(g, botao){
   a.play().catch(() => { toast("Não consegui tocar o áudio."); botao.classList.remove("on"); botao.innerHTML = "&#9654;"; });
 }
 
-/* ============ interpretador de português ============ */
-const semAcento = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+
+/* ============ vocabulário do Rob ============ */
+const VOCAB_AREAS = [
+  {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda"]},
+  {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita"]},
+  {nome:"Linha escondida",   tipo:"Linha", apelidos:["escondida","linha de tras"]},
+  {nome:"Linha Piscina 1",   tipo:"Linha", apelidos:["piscina 1","linha piscina um"]},
+  {nome:"Linha Piscina 2A",  tipo:"Linha", apelidos:["piscina 2a","linha 2a"]},
+  {nome:"Linha Piscina 2B",  tipo:"Linha", apelidos:["piscina 2b","linha 2b"]},
+  {nome:"Linha do tomate",   tipo:"Linha", apelidos:["linha dos tomates","tomate","tomates"]},
+  {nome:"Estufa 1",          tipo:"Estufa",apelidos:["estufa um"]},
+  {nome:"Estufa 2",          tipo:"Estufa",apelidos:["estufa dois"]},
+  {nome:"Estufa 3",          tipo:"Estufa",apelidos:["estufa tres"]}
+];
+const VOCAB_INSUMOS = [
+  {nome:"Chorume",              tipo:"Biofertilizante", unidade:"L",  apelidos:["churume"]},
+  {nome:"Cinza",                tipo:"Corretivo",       unidade:"kg", apelidos:["cinzas"]},
+  {nome:"Defensivo Neem",       tipo:"Defensivo",       unidade:"L",  apelidos:["neem","nim","oleo de neem"]},
+  {nome:"Terra de minhocário",  tipo:"Adubo",           unidade:"L",  apelidos:["minhocario","humus","terra de minhoca"]},
+  {nome:"Esterco",              tipo:"Adubo",           unidade:"kg", apelidos:["esterco de gado","estrume"]}
+];
+
+async function instalarVocabulario(){
+  let novas = 0, novosIns = 0;
+  for(const v of VOCAB_AREAS){
+    if(S.areas.some(a => semAcento(a.nome) === semAcento(v.nome))) continue;
+    const o = {id:uid(), nome:v.nome, tipo:v.tipo, frequencia:null, cultura:"",
+               apelidos:v.apelidos, obs:"", criadoEm:new Date().toISOString()};
+    await put("areas", o); S.areas.push(o); novas++;
+  }
+  for(const v of VOCAB_INSUMOS){
+    if(S.insumos.some(i => semAcento(i.nome) === semAcento(v.nome))) continue;
+    const o = {id:uid(), nome:v.nome, tipo:v.tipo, unidade:v.unidade, apelidos:v.apelidos,
+               carencia:null, obs:"", criadoEm:new Date().toISOString()};
+    await put("insumos", o); S.insumos.push(o); novosIns++;
+  }
+  return {novas, novosIns};
+}
+
+/* ============ interpretador (vocabulário fechado) ============ */
+/* O Chrome ouve como quer — "linha dois" pode virar "linda dois". Não dá pra mandar
+   nele. O que dá é comparar o que ele ouviu com a lista fixa do Rob e escolher o mais
+   parecido. Lista pequena e conhecida = acerto alto. O que não bater, ele pergunta. */
+
+const semAcento = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/\s+/g," ").trim();
 
 const NUM_PT = {zero:0,um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,
   dez:10,onze:11,doze:12,treze:13,quatorze:14,catorze:14,quinze:15,dezesseis:16,dezessete:17,dezoito:18,
   dezenove:19,vinte:20,trinta:30,quarenta:40,cinquenta:50,sessenta:60,setenta:70,oitenta:80,noventa:90,
   cem:100,cento:100,duzentos:200,trezentos:300,quatrocentos:400,quinhentos:500,meio:0.5,meia:0.5};
 
-/* "meio" quase sempre é lugar ("canteiro do meio"), não metade.
-   Só vira 0,5 quando vem colado numa unidade: "meia hora", "meio litro". */
 const UNIDADE_TOK = /^(hora|horas|minuto|minutos|litro|litros|quilo|quilos|kg|grama|gramas|dia|dias)$/;
 
 function numerosParaDigitos(txt){
@@ -581,103 +623,131 @@ function numerosParaDigitos(txt){
   return out.join(" ");
 }
 
-const VERBOS = {
-  plantio:   /\b(plantei|plantamos|semeei|semeamos|mudei de lugar|transplantei)\b/,
-  colheita:  /\b(colhi|colhemos|colheita|tirei)\b/,
-  irrigacao: /\b(irriguei|irrigamos|reguei|regamos|regei|molhei|molhamos|aguei|dei agua|joguei agua|coloquei agua|botei agua)\b/,
-  insumo:    /\b(apliquei|aplicamos|adubei|adubamos|pulverizei|espalhei|botei|coloquei|passei|joguei|usei)\b/,
-  observacao:/\b(notei|reparei|observei|percebi|vi que|esta|estao|apareceu|surgiu)\b/
-};
+function normalizarFala(t){
+  let x = semAcento(t);
+  x = numerosParaDigitos(x);
+  x = x.replace(/(\d)[.,](\d)/g, "$1\u0001$2");      /* protege decimais: 0,5 e 0.5 */
+  x = x.replace(/[^a-z0-9\s\u0001]/g, " ");
+  x = x.replace(/\u0001/g, ".");
+  x = x.replace(/\b(\d+)\s+([ab])\b/g, "$1$2");     /* "piscina 2 a" -> "piscina 2a" */
+  return x.replace(/\s+/g," ").trim();
+}
+
+/* distância de edição: quantas letras precisam mudar de uma palavra pra outra */
+function distancia(a, b){
+  const m = a.length, n = b.length;
+  if(!m) return n; if(!n) return m;
+  let ant = new Array(n+1), atual = new Array(n+1);
+  for(let j = 0; j <= n; j++) ant[j] = j;
+  for(let i = 1; i <= m; i++){
+    atual[0] = i;
+    for(let j = 1; j <= n; j++)
+      atual[j] = Math.min(ant[j] + 1, atual[j-1] + 1, ant[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    const t = ant; ant = atual; atual = t;
+  }
+  return ant[n];
+}
+const parecido = (a, b) => { const m = Math.max(a.length, b.length); return m ? 1 - distancia(a,b)/m : 0; };
+
+/* todas as formas de chamar uma área */
+function termosDaArea(a){
+  const lista = [a.nome];
+  (a.apelidos || []).forEach(x => lista.push(x));
+  if(a.cultura) lista.push(a.cultura);
+  const toks = semAcento(a.nome).split(" ");
+  if(toks.length > 1){
+    const resto = toks.slice(1);
+    while(resto.length && /^(do|da|de|dos|das|o|a|os|as)$/.test(resto[0])) resto.shift();
+    if(resto.length) lista.push(resto.join(" "));
+  }
+  return [...new Set(lista.map(normalizarFala))].filter(x => x.length >= 3);
+}
+const termosDoInsumo = i => [...new Set([i.nome].concat(i.apelidos||[]).map(normalizarFala))].filter(x => x.length >= 3);
+
+/* procura o item da lista mais parecido com algum trecho da fala */
+function acharNoTexto(txt, itens, termosDe, minSim){
+  const toks = txt.split(" ");
+  let melhor = null;
+  itens.forEach(it => {
+    termosDe(it).forEach(termo => {
+      const nt = termo.split(" ").length;
+      for(let i = 0; i < toks.length; i++){
+        for(let n = Math.max(1, nt-1); n <= nt+1 && i+n <= toks.length; n++){
+          const janela = toks.slice(i, i+n).join(" ");
+          const s = parecido(janela, termo);
+          if(s >= minSim && (!melhor || s > melhor.s + 0.001 ||
+             (Math.abs(s - melhor.s) <= 0.001 && termo.length > melhor.termo.length)))
+            melhor = {s, item: it, termo, i, n};
+        }
+      }
+    });
+  });
+  return melhor;
+}
+
+const ACOES = [
+  {p:"reguei",    tipo:"irrigacao"}, {p:"regei", tipo:"irrigacao"}, {p:"regamos", tipo:"irrigacao"},
+  {p:"irriguei",  tipo:"irrigacao"}, {p:"irrigamos", tipo:"irrigacao"}, {p:"molhei", tipo:"irrigacao"},
+  {p:"pulverizei",tipo:"insumo", forma:"Foliar"}, {p:"pulverizamos", tipo:"insumo", forma:"Foliar"},
+  {p:"adicionei", tipo:"insumo"}, {p:"adubei", tipo:"insumo"}, {p:"apliquei", tipo:"insumo"},
+  {p:"botei",     tipo:"insumo"}, {p:"coloquei", tipo:"insumo"}, {p:"passei", tipo:"insumo"},
+  {p:"podei",     tipo:"poda"},   {p:"podamos", tipo:"poda"}, {p:"fiz a poda", tipo:"poda"},
+  {p:"plantei",   tipo:"plantio"},{p:"plantamos", tipo:"plantio"}, {p:"semeei", tipo:"plantio"},
+  {p:"comecei o plantio", tipo:"plantio"}, {p:"comecei plantio", tipo:"plantio"},
+  {p:"colhi",     tipo:"colheita"},{p:"colhemos", tipo:"colheita"}
+];
+const acharAcao = txt => acharNoTexto(txt, ACOES, a => [a.p], 0.82);
 
 const METODOS_RE = [[/\bmicro ?aspers/,"Microaspersão"],[/\bgotej/,"Gotejo"],[/\baspers|aspersor/,"Aspersão"],
                     [/\bmangueir/,"Mangueira"],[/\bregador|balde|manual/,"Manual"]];
 const FORMAS_RE  = [[/\bfertirriga/,"Fertirrigação"],[/\bfoliar|na folha|nas folhas/,"Foliar"],
                     [/\bno solo|na terra|no chao/,"No solo"],[/\bcobertura/,"Cobertura"]];
 
-/* casa um texto com as áreas ou insumos já cadastrados, usando nome e apelidos */
-function casar(texto, itens, apelidosDe){
-  const t = semAcento(texto);
-  let melhor = null, melhorTam = 0;
-  itens.forEach(it => {
-    const cands = [it.nome].concat(apelidosDe ? (apelidosDe(it)||[]) : []);
-    cands.forEach(c => {
-      const n = semAcento(c);
-      if(n.length < 3) return;
-      if(t.includes(n) && n.length > melhorTam){ melhor = it; melhorTam = n.length; }
-    });
-  });
-  if(melhor) return {item:melhor, exato:true};
-  /* tentativa mais frouxa — mas exigente de propósito: precisa de pelo menos duas
-     palavras significativas batendo. Sem isso, "estufa nova" seria confundida com
-     "Estufa 1" e o registro iria pro lugar errado calado. Melhor perguntar. */
-  itens.forEach(it => {
-    const cands = [it.nome].concat(apelidosDe ? (apelidosDe(it)||[]) : []);
-    cands.forEach(c => {
-      const toks = semAcento(c).split(" ").filter(x => x.length > 2);
-      if(toks.length < 2) return;
-      const achou = toks.filter(x => t.includes(x)).length;
-      if(achou >= 2 && achou / toks.length >= 0.6 && achou > melhorTam){ melhor = it; melhorTam = achou; }
-    });
-  });
-  return melhor ? {item:melhor, exato:false} : null;
+const MESES = {janeiro:1,fevereiro:2,marco:3,abril:4,maio:5,junho:6,julho:7,
+               agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
+
+function dataISO(y, m, d){
+  return y + "-" + String(m).padStart(2,"0") + "-" + String(d).padStart(2,"0");
 }
+function acharData(txt, hoje){
+  if(/\banteontem\b/.test(txt)) return new Date(dayStart(hoje) - 2*MS_DAY).toISOString().slice(0,10);
+  if(/\bontem\b/.test(txt))     return new Date(dayStart(hoje) - 1*MS_DAY).toISOString().slice(0,10);
 
-/* tenta achar um nome de lugar que ainda não existe.
-   Primeiro olha logo depois do verbo ("reguei A ESTUFA 1 por..."), que é onde o nome
-   quase sempre está. Só se isso falhar é que tenta pela preposição. */
-const NAO_E_AREA = /^(agua|terra|solo|chao|folha|folhas|planta|plantas|ponta|cima|baixo|fundo|manha|tarde|noite|hoje|ontem|anteontem|mangueira|gotejo|aspersao|aspersor|microaspersao|micro aspersao|regador|balde|manual|foliar|cobertura|fertirrigacao|muda|mudas|litro|litros|quilo|quilos)$/;
-
-const APOS_VERBO = /\b(?:reguei|regamos|regei|irriguei|irrigamos|molhei|molhamos|aguei|apliquei|aplicamos|adubei|adubamos|pulverizei|espalhei|botei|coloquei|passei|joguei|usei|plantei|plantamos|semeei|colhi|colhemos|tirei)\s+(?:[ao]s?\s+)?([a-z0-9][a-z0-9 ]{2,40})/;
-
-const CORTA_AREA = /\b(por|durante|com|de|minutos?|min|horas?|litros?|quilos?|kg|gramas?|hoje|ontem|anteontem|manha|tarde|noite|cada|dias?|semanas?|mes|meses|e)\b/;
-
-function aparaArea(frase){
-  if(!frase) return "";
-  const c = frase.search(CORTA_AREA);
-  if(c > 0) frase = frase.slice(0, c);
-  return frase.trim().replace(/\s+/g," ");
-}
-
-function validaArea(frase){
-  if(!frase) return null;
-  const n = frase.split(" ").length;
-  if(frase.length < 3 || n > 4) return null;
-  if(NAO_E_AREA.test(frase)) return null;
-  if(/^\d+$/.test(frase)) return null;
-  return frase.replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function candidatoArea(texto){
-  const t = semAcento(texto);
-
-  const mv = t.match(APOS_VERBO);
-  if(mv){
-    const ok = validaArea(aparaArea(mv[1]));
-    if(ok) return ok;
+  const [ay, am, ad] = hoje.split("-").map(Number);
+  let m = txt.match(/\b(\d{1,2})\s+de\s+([a-z]+)/);
+  if(m){
+    const nome = Object.keys(MESES).find(x => parecido(m[2], x) >= 0.8);
+    if(nome){
+      const dia = +m[1], mes = MESES[nome];
+      let ano = ay;
+      if(mes > am || (mes === am && dia > ad)) ano--;   /* mês à frente = ano passado */
+      return dataISO(ano, mes, dia);
+    }
   }
-
-  const m = t.match(/\b(na|no|nas|nos|em|do|da|dos|das)\s+((?:[a-z0-9]+\s+){0,3}[a-z0-9]+)/);
-  if(!m) return null;
-  let frase = aparaArea(m[2]);
-  if(/^d[ao]s?$/.test(m[1])){
-    const antes = t.slice(0, m.index).trim().split(" ");
-    const ant = antes[antes.length-1] || "";
-    if(ant.length > 2 && !/^(a|o|as|os|na|no|nas|nos|em|de|por|com|uma?)$/.test(ant)
-       && !/^\d+$/.test(ant) && !temVerbo(ant))
-      frase = ant + " " + m[1] + " " + frase;
+  m = txt.match(/\b(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?/);
+  if(m){
+    let ano = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : ay;
+    const mes = +m[2], dia = +m[1];
+    if(!m[3] && (mes > am || (mes === am && dia > ad))) ano--;
+    return dataISO(ano, mes, dia);
   }
-  return validaArea(frase);
+  m = txt.match(/\bdia (\d{1,2})\b/);
+  if(m){
+    const dia = +m[1];
+    let mes = am, ano = ay;
+    if(dia > ad){ mes--; if(mes < 1){ mes = 12; ano--; } }
+    return dataISO(ano, mes, dia);
+  }
+  return hoje;
 }
 
-function temVerbo(frag){
-  return Object.keys(VERBOS).some(k => k !== "observacao" && VERBOS[k].test(frag));
-}
+function temAcao(frag){ return !!acharAcao(frag); }
 
 function fragmentar(txt){
   const partes = txt.split(/\s+(?:e tambem|tambem|e)\s+/);
   const frags = [];
   partes.forEach(p => {
-    if(!frags.length || temVerbo(p)) frags.push(p);
+    if(!frags.length || temAcao(p)) frags.push(p);
     else frags[frags.length-1] += " e " + p;
   });
   return frags.filter(f => f.trim());
@@ -689,47 +759,40 @@ function interpretar(falaOriginal, ctx){
   const insumos = ctx.insumos || S.insumos;
   const hoje    = ctx.hoje    || todayISO();
 
-  const base = numerosParaDigitos(semAcento(falaOriginal));
+  const base = normalizarFala(falaOriginal);
   const frags = fragmentar(base);
   const drafts = [];
   let areaHerdada = null;
 
   frags.forEach(frag => {
-    const d = {tipo:"observacao", data:hoje, hora:nowHM(), obs:""};
-
-    /* data relativa */
-    let diasAtras = 0;
-    if(/\banteontem\b/.test(frag)) diasAtras = 2;
-    else if(/\bontem\b/.test(frag)) diasAtras = 1;
-    if(diasAtras) d.data = new Date(dayStart(hoje) - diasAtras*MS_DAY).toISOString().slice(0,10);
+    const d = {tipo:"observacao", data: acharData(frag, hoje), hora: nowHM(), obs:""};
     if(/\bde manha|pela manha\b/.test(frag)) d.hora = "08:00";
     else if(/\bde tarde|a tarde|pela tarde\b/.test(frag)) d.hora = "15:00";
 
-    /* insumo conhecido */
-    const mi = casar(frag, insumos, () => []);
-    if(mi) d.insumoId = mi.item.id;
+    const acao = acharAcao(frag);
+    const ins  = acharNoTexto(frag, insumos, termosDoInsumo, 0.75);
 
-    /* tipo */
-    if(VERBOS.plantio.test(frag)) d.tipo = "plantio";
-    else if(VERBOS.colheita.test(frag)) d.tipo = "colheita";
-    else if(mi) d.tipo = "insumo";
-    else if(VERBOS.irrigacao.test(frag)) d.tipo = "irrigacao";
-    else if(VERBOS.insumo.test(frag)) d.tipo = "insumo";
+    if(acao){
+      d.tipo = acao.item.tipo;
+      if(acao.item.forma) d.forma = acao.item.forma;
+      /* "reguei" com um insumo na frase é aplicação, não rega */
+      if(d.tipo === "irrigacao" && ins) d.tipo = "insumo";
+    } else if(ins){
+      d.tipo = "insumo";
+    }
+    if(ins && (d.tipo === "insumo")){ d.insumoId = ins.item.id; if(!d.unidade) d.unidade = ins.item.unidade; }
 
-    /* área */
-    const ma = casar(frag, areas, a => a.apelidos);
-    if(ma) { d.areaId = ma.item.id; areaHerdada = ma.item.id; }
-    else if(areaHerdada) d.areaId = areaHerdada;
-    else { const cand = candidatoArea(frag); if(cand) d.areaSugerida = cand; }
+    const ar = acharNoTexto(frag, areas, termosDaArea, 0.75);
+    if(ar){ d.areaId = ar.item.id; areaHerdada = ar.item.id; d.areaConfianca = ar.s; }
+    else if(areaHerdada && d.tipo !== "observacao") d.areaId = areaHerdada;
 
-    /* números e unidades */
+    const n = x => parseFloat(String(x).replace(",","."));
     const min = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:minutos?|min\b)/);
     const hrs = frag.match(/(\d+(?:[.,]\d+)?)\s*horas?/);
     const lit = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:litros?|l\b)/);
     const kg  = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:quilos?|kg\b)/);
     const gr  = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:gramas?|g\b)/);
     const uni = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:mudas?|pes?\b|plantas?|sementes?|covas?)/);
-    const n = x => parseFloat(String(x).replace(",","."));
 
     if(d.tipo === "irrigacao"){
       if(min) d.duracao = n(min[1]);
@@ -741,22 +804,17 @@ function interpretar(falaOriginal, ctx){
       else if(kg){ d.quantidade = n(kg[1]); d.unidade = "kg"; }
       else if(gr){ d.quantidade = n(gr[1]); d.unidade = "g"; }
       for(const [re,v] of FORMAS_RE) if(re.test(frag)){ d.forma = v; break; }
-      if(!d.insumoId){
-        const dep = frag.match(/\b(?:apliquei|adubei|pulverizei|espalhei|botei|coloquei|passei|joguei|usei|com|de)\s+(?:\d+\s*(?:litros?|quilos?|kg|gramas?|g|l)\s+(?:de\s+)?)?([a-z]{3,20})/);
-        if(dep && !/^(agua|na|no|nas|nos|em|uma?|dois|duas)$/.test(dep[1]))
-          d.insumoSugerido = dep[1].replace(/\b\w/, c => c.toUpperCase());
-      }
     } else if(d.tipo === "plantio"){
       if(uni) d.quantidade = n(uni[1]);
-      const cult = frag.match(/\bplantei\s+(?:\d+\s+(?:mudas?|pes?|plantas?|sementes?|covas?)\s+(?:de\s+)?)?([a-z]{3,20})/);
-      if(cult && !/^(na|no|nas|nos|em|uma?)$/.test(cult[1])) d.cultura = cult[1].replace(/\b\w/, c => c.toUpperCase());
+      const cult = frag.match(/\b(?:plantei|plantamos|semeei|plantio\s+de)\s+(?:\d+\s+(?:mudas?|pes?|plantas?|sementes?|covas?)\s+(?:de\s+)?)?([a-z]{3,20})/);
+      if(cult && !/^(na|no|nas|nos|em|uma?|dia)$/.test(cult[1]))
+        d.cultura = cult[1].replace(/\b\w/, c => c.toUpperCase());
     } else if(d.tipo === "colheita"){
       if(kg){ d.quantidade = n(kg[1]); d.unidade = "kg"; }
       else if(gr){ d.quantidade = n(gr[1]); d.unidade = "g"; }
       else if(uni){ d.quantidade = n(uni[1]); d.unidade = "un"; }
     }
 
-    /* regra falada — ainda não implementada, mas não pode se perder */
     const regra = frag.match(/\ba cada (\d+) (dias?|semanas?|mes(?:es)?)\b|\btod[oa]s? (?:os |as )?(dias?|semanas?|mes(?:es)?)\b|\bde (\d+) em \d+ dias?\b/);
     if(regra) d.regraDetectada = regra[0];
 
@@ -764,9 +822,7 @@ function interpretar(falaOriginal, ctx){
     drafts.push(d);
   });
 
-  /* se tudo virou observação, junta numa só */
-  if(drafts.length > 1 && drafts.every(d => d.tipo === "observacao"))
-    return [drafts[0]];
+  if(drafts.length > 1 && drafts.every(d => d.tipo === "observacao")) return [drafts[0]];
   return drafts;
 }
 
@@ -891,6 +947,24 @@ function formColheita(pre){
   })]);
 }
 
+function formPoda(pre){
+  if(needAreas()) return; pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(),defArea(pre)), fData=input("date",pre.data||todayISO());
+  const fObs=textarea(pre.obs||"","o que foi podado, quanto tirou…");
+  const snap=()=>Object.assign({},pre,{data:fData.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formPoda(Object.assign(snap(),{areaId:na.id}))));
+  w.appendChild(field("Data",fData));
+  w.appendChild(field("Observação",fObs));
+  openSheet("Registrar poda",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),
+    btn("Salvar","pri",async()=>{
+      if(!fArea.value) return showErr(eb,"Escolha a área.");
+      const r={id:uid(),tipo:"poda",areaId:fArea.value,data:fData.value||todayISO(),hora:pre.hora||nowHM(),
+               obs:fObs.value.trim(),gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+      await salvarRegistro(r,pre); toast("Poda registrada");
+    })]);
+}
+
 function formObs(pre){
   pre=pre||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
@@ -1011,6 +1085,7 @@ function telaConfirmar(texto, drafts, g){
     });
     if(d.tipo === "irrigacao") formIrrigacao(pre);
     else if(d.tipo === "insumo") formInsumo(pre);
+    else if(d.tipo === "poda") formPoda(pre);
     else if(d.tipo === "plantio") formPlantio(pre);
     else if(d.tipo === "colheita") formColheita(pre);
     else formObs(pre);
@@ -1028,8 +1103,8 @@ function telaConfirmar(texto, drafts, g){
       const desc = descRegistro(d);
       if(desc) bd.appendChild(el("div","t2", esc(desc)));
       const faltas = [];
-      if(!d.areaId && d.tipo !== "observacao") faltas.push(d.areaSugerida ? "área “" + d.areaSugerida + "” não cadastrada" : "falta a área");
-      if(d.tipo === "insumo" && !d.insumoId) faltas.push(d.insumoSugerido ? "insumo “" + d.insumoSugerido + "” não cadastrado" : "falta o insumo");
+      if(!d.areaId && d.tipo !== "observacao") faltas.push("não entendi a área");
+      if(d.tipo === "insumo" && !d.insumoId) faltas.push("não entendi o insumo");
       if(d.tipo === "plantio" && !d.cultura) faltas.push("falta a cultura");
       if(faltas.length){ const f = el("div","t2 falta", esc(faltas.join(" · "))); bd.appendChild(f); }
       b.appendChild(bd);
@@ -1037,23 +1112,34 @@ function telaConfirmar(texto, drafts, g){
       b.onclick = () => editar(ix);
       c.appendChild(b);
 
-      const acts = el("div","grav-acts"); acts.style.padding = "0 14px 14px";
-      if(!d.areaId && d.areaSugerida){
-        const cr = el("button","mini"); cr.textContent = "Criar área “" + d.areaSugerida + "”";
-        cr.onclick = () => formArea(null, nova => {
-          drafts.forEach(x => { if(!x.areaId) x.areaId = nova.id; });
-          voltar();
-        }, d.areaSugerida);
-        acts.appendChild(cr);
+      /* não reconheceu a área: mostra as suas, em botões grandes */
+      if(!d.areaId && d.tipo !== "observacao"){
+        const esc1 = el("div"); esc1.style.padding = "0 14px 4px";
+        esc1.appendChild(el("div","sec-t","Qual área?"));
+        const chips = el("div","chips");
+        S.areas.forEach(a => {
+          const ch = el("button","chip", esc(a.nome));
+          ch.onclick = () => { drafts.forEach(x => { if(!x.areaId) x.areaId = a.id; }); desenhar(); };
+          chips.appendChild(ch);
+        });
+        esc1.appendChild(chips);
+        c.appendChild(esc1);
       }
-      if(d.tipo === "insumo" && !d.insumoId && d.insumoSugerido){
-        const ci = el("button","mini"); ci.textContent = "Criar insumo “" + d.insumoSugerido + "”";
-        ci.onclick = () => formCadInsumo(null, novo => {
-          drafts.forEach(x => { if(x.tipo === "insumo" && !x.insumoId){ x.insumoId = novo.id; if(!x.unidade) x.unidade = novo.unidade; } });
-          voltar();
-        }, d.insumoSugerido);
-        acts.appendChild(ci);
+      /* não reconheceu o insumo: idem */
+      if(d.tipo === "insumo" && !d.insumoId){
+        const esc2 = el("div"); esc2.style.padding = "10px 14px 4px";
+        esc2.appendChild(el("div","sec-t","Qual insumo?"));
+        const chips = el("div","chips");
+        S.insumos.forEach(i => {
+          const ch = el("button","chip", esc(i.nome));
+          ch.onclick = () => { d.insumoId = i.id; if(!d.unidade) d.unidade = i.unidade; desenhar(); };
+          chips.appendChild(ch);
+        });
+        esc2.appendChild(chips);
+        c.appendChild(esc2);
       }
+
+      const acts = el("div","grav-acts"); acts.style.padding = "10px 14px 14px";
       if(drafts.length > 1){
         const rm = el("button","mini d"); rm.textContent = "Remover";
         rm.onclick = () => { drafts.splice(ix,1); desenhar(); };
@@ -1067,8 +1153,8 @@ function telaConfirmar(texto, drafts, g){
 
   const salvar = async () => {
     for(const d of drafts){
-      if(d.tipo !== "observacao" && !d.areaId) return showErr(eb, "Falta dizer a área. Toque em “editar” ou crie a área.");
-      if(d.tipo === "insumo" && !d.insumoId) return showErr(eb, "Falta dizer qual insumo. Toque em “editar” ou crie o insumo.");
+      if(d.tipo !== "observacao" && !d.areaId) return showErr(eb, "Escolha a área nos botões acima.");
+      if(d.tipo === "insumo" && !d.insumoId) return showErr(eb, "Escolha o insumo nos botões acima.");
       if(d.tipo === "plantio" && !d.cultura) return showErr(eb, "Falta dizer o que foi plantado. Toque em “editar”.");
     }
     if(g){
@@ -1079,7 +1165,7 @@ function telaConfirmar(texto, drafts, g){
 
     for(const d of drafts){
       const r = Object.assign({}, d);
-      delete r.areaSugerida; delete r.insumoSugerido;
+      delete r.areaSugerida; delete r.insumoSugerido; delete r.areaConfianca;
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
       if(r.tipo === "plantio"){
@@ -1246,6 +1332,7 @@ function escolherTipo(pre){
     const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t); b.onclick=fn; return b; };
   c.appendChild(it("&#128167;","Irrigação",()=>formIrrigacao(pre)));
   c.appendChild(it("&#129524;","Insumo",()=>formInsumo(pre)));
+  c.appendChild(it("&#9986;","Poda",()=>formPoda(pre)));
   c.appendChild(it("&#127793;","Plantio",()=>formPlantio(pre)));
   c.appendChild(it("&#127807;","Colheita",()=>formColheita(pre)));
   c.appendChild(it("&#128221;","Observação",()=>formObs(pre)));
@@ -1263,7 +1350,7 @@ function screenDiario(){
   fb.oninput=()=>{ busca=fb.value; lista(); };
   f.appendChild(fb);
   const chips=el("div","chips"); chips.style.marginBottom="12px";
-  ["irrigacao","insumo","plantio","colheita","observacao"].forEach(t=>{
+  ["irrigacao","insumo","poda","plantio","colheita","observacao"].forEach(t=>{
     const c=el("button","chip"+(filtroTipo===t?" on":""),esc(TIPO_LB[t]));
     c.onclick=()=>{ filtroTipo=filtroTipo===t?null:t; render(); };
     chips.appendChild(c);
@@ -1430,7 +1517,10 @@ function screenMais(){
   const c3=el("div","card"); c3.style.marginTop="18px";
   c3.appendChild(item("&#128190;","Exportar backup","",exportar));
   c3.appendChild(item("&#128228;","Importar backup","",importar));
-  c3.appendChild(item("&#129514;","Carregar dados de exemplo","",exemplos));
+  c3.appendChild(item("&#128221;","Recarregar meu vocabulário","áreas e insumos", async()=>{
+    const r = await instalarVocabulario(); render();
+    toast(r.novas || r.novosIns ? "Repus "+r.novas+" área(s) e "+r.novosIns+" insumo(s)" : "Já estava tudo lá");
+  }));
   c3.appendChild(item("&#128465;","Apagar tudo","",apagarTudo));
   v.appendChild(c3);
 
@@ -1580,7 +1670,14 @@ async function exemplos(){
 
 /* ============ boot ============ */
 (async function(){
-  try{ await open(); await load(); render(); }
+  try{
+    await open(); await load();
+    if(!S.areas.length && !S.registros.length && !S.gravacoes.length){
+      await instalarVocabulario();
+      await load();
+    }
+    render();
+  }
   catch(e){
     $("#view").innerHTML='<div class="empty"><b>Não consegui abrir o banco de dados.</b><br>Se você estiver numa aba anônima, tente numa aba normal.</div>';
     console.error(e);
