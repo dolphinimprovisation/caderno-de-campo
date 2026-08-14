@@ -393,48 +393,59 @@ function comprimir(file){
 function imgFrom(blob,cls){ const i=el("img",cls); i.src=URL.createObjectURL(blob); i.onload=()=>{}; return i; }
 
 /* ============ fala ao vivo ============ */
+/* No Android o reconhecimento de voz precisa do microfone com exclusividade.
+   Por isso: se o navegador entende voz, ele fica com o microfone sozinho.
+   Só quando não entende é que gravamos o áudio pra não perder o que foi dito. */
 let sess = null;
 function micSuportado(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
 function falaSuportada(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+const ehMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
-async function toggleFala(){
+function toggleFala(){
   if(sess){ encerrarFala(); return; }
-  if(!micSuportado()){ toast("Este navegador não permite gravar áudio aqui."); return; }
+  if(falaSuportada()) iniciarEscuta(); else iniciarGravacao();
+}
 
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({audio:true}); }
-  catch(e){ console.error(e); toast("Não consegui usar o microfone. Verifique a permissão do navegador."); return; }
+function iniciarEscuta(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const sr = new SR();
+  sr.lang = "pt-BR";
+  sr.continuous = !ehMobile();   /* no Android, contínuo trava: reiniciamos a cada pausa */
+  sr.interimResults = true;
+  sr.maxAlternatives = 1;
 
-  const mime = ["audio/webm;codecs=opus","audio/webm","audio/mp4"]
-    .find(m => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
-  const mr = new MediaRecorder(stream, mime ? {mimeType:mime, audioBitsPerSecond:24000} : {});
+  sess = {modo:"escuta", sr, inicio:Date.now(), texto:"", parcial:"", erro:null, encerrando:false, timer:null};
 
-  sess = {mr, stream, chunks:[], inicio:Date.now(), mime, texto:"", parcial:"", erro:null, sr:null, encerrando:false, timer:null};
-  mr.ondataavailable = e => { if(e.data && e.data.size) sess.chunks.push(e.data); };
-  mr.onstop = () => finalizarFala();
-  mr.start();
+  sr.onresult = ev => {
+    if(!sess) return;
+    let fin = "", par = "";
+    for(let i = ev.resultIndex; i < ev.results.length; i++){
+      const r = ev.results[i];
+      if(r.isFinal) fin += r[0].transcript + " "; else par += r[0].transcript;
+    }
+    if(fin){ sess.texto += fin; sess.parcial = ""; } else { sess.parcial = par; }
+    sess.erro = null;
+    pintarFala();
+  };
+  sr.onerror = ev => {
+    if(!sess) return;
+    sess.erro = ev.error;
+    if(ev.error === "not-allowed" || ev.error === "service-not-allowed" || ev.error === "audio-capture"){
+      sess.encerrando = true;
+      try { sr.stop(); } catch(e){}
+    }
+    pintarFala();
+  };
+  sr.onend = () => {
+    if(!sess) return;
+    if(!sess.encerrando){                       /* pausa natural: volta a ouvir */
+      try { sr.start(); return; } catch(e){}
+    }
+    finalizarEscuta();
+  };
 
-  if(falaSuportada()){
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const sr = new SR();
-    sr.lang = "pt-BR"; sr.continuous = true; sr.interimResults = true; sr.maxAlternatives = 1;
-    sr.onresult = ev => {
-      if(!sess) return;
-      let fin = "", par = "";
-      for(let i = ev.resultIndex; i < ev.results.length; i++){
-        const r = ev.results[i];
-        if(r.isFinal) fin += r[0].transcript + " "; else par += r[0].transcript;
-      }
-      if(fin) sess.texto += fin;
-      sess.parcial = par;
-      pintarFala();
-    };
-    sr.onerror = ev => { if(sess) sess.erro = ev.error; };
-    sr.onend = () => { if(sess && !sess.encerrando){ try{ sr.start(); }catch(e){} } };
-    try { sr.start(); sess.sr = sr; } catch(e){ sess.erro = "start"; }
-  } else {
-    sess.erro = "sem-suporte";
-  }
+  try { sr.start(); }
+  catch(e){ sess = null; toast("Não consegui iniciar o microfone."); return; }
 
   render();
   sess.timer = setInterval(() => {
@@ -443,45 +454,85 @@ async function toggleFala(){
   }, 250);
 }
 
+function finalizarEscuta(){
+  const s = sess; if(!s) return;
+  sess = null;
+  clearInterval(s.timer);
+  const texto = ((s.texto || "") + " " + (s.parcial || "")).replace(/\s+/g," ").trim();
+  render();
+  if(!texto){
+    toast(s.erro === "not-allowed" || s.erro === "service-not-allowed"
+            ? "O navegador não liberou o microfone. Autorize nas permissões do site."
+        : s.erro === "audio-capture" ? "Não consegui acessar o microfone. Feche outros apps que estejam usando ele."
+        : s.erro === "network" ? "Sem internet pra entender a fala agora."
+        : "Não ouvi nada. Toque de novo e fale mais perto do aparelho.");
+    return;
+  }
+  telaConfirmar(texto, interpretar(texto), null);
+}
+
+/* modo sem reconhecimento: guarda o áudio pra não perder o que foi dito */
+async function iniciarGravacao(){
+  if(!micSuportado()){ toast("Este navegador não permite gravar áudio aqui."); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(e){ console.error(e); toast("Não consegui usar o microfone. Verifique a permissão do navegador."); return; }
+
+  const mime = ["audio/webm;codecs=opus","audio/webm","audio/mp4"]
+    .find(m => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+  const mr = new MediaRecorder(stream, mime ? {mimeType:mime, audioBitsPerSecond:24000} : {});
+
+  sess = {modo:"gravacao", mr, stream, chunks:[], inicio:Date.now(), mime, texto:"", parcial:"", erro:null, encerrando:false, timer:null};
+  mr.ondataavailable = e => { if(e.data && e.data.size) sess.chunks.push(e.data); };
+  mr.onstop = () => finalizarGravacao();
+  mr.start();
+
+  render();
+  sess.timer = setInterval(() => {
+    const t = document.getElementById("micTime");
+    if(t && sess) t.textContent = fmtDur(Math.round((Date.now() - sess.inicio)/1000));
+  }, 250);
+}
+
+async function finalizarGravacao(){
+  const s = sess; if(!s) return;
+  sess = null;
+  clearInterval(s.timer);
+  try { s.stream.getTracks().forEach(t => t.stop()); } catch(e){}
+  const dur = Math.max(1, Math.round((Date.now() - s.inicio)/1000));
+  const blob = new Blob(s.chunks, {type: s.mime || "audio/webm"});
+  if(blob.size < 400){ render(); toast("Gravação muito curta, descartada."); return; }
+  const g = {id:uid(), blob, dur, tipoMime:blob.type, data:todayISO(), hora:nowHM(),
+             status:"pendente", texto:null, areaId:null, criadoEm:new Date().toISOString()};
+  await put("gravacoes", g); S.gravacoes.push(g);
+  render();
+  toast("Este navegador não entende voz. O áudio ficou guardado em Gravações.");
+}
+
 function encerrarFala(){
   if(!sess || sess.encerrando) return;
   sess.encerrando = true;
   clearInterval(sess.timer); sess.timer = null;
-  if(sess.sr){ try{ sess.sr.stop(); }catch(e){} }
-  try { sess.mr.stop(); } catch(e){ finalizarFala(); }
+  if(sess.modo === "escuta"){ try { sess.sr.stop(); } catch(e){ finalizarEscuta(); } }
+  else { try { sess.mr.stop(); } catch(e){ finalizarGravacao(); } }
 }
 
 function pintarFala(){
   const box = document.getElementById("falaViva");
   if(!box || !sess) return;
   const t = (sess.texto || "").trim(), p = (sess.parcial || "").trim();
-  box.innerHTML = t || p
-    ? esc(t) + (p ? ' <span class="par">' + esc(p) + '</span>' : "")
-    : '<span class="par">Pode falar…</span>';
-}
-
-async function finalizarFala(){
-  const s = sess; if(!s) return;
-  sess = null;
-  try { s.stream.getTracks().forEach(t => t.stop()); } catch(e){}
-  const dur = Math.max(1, Math.round((Date.now() - s.inicio)/1000));
-  const blob = new Blob(s.chunks, {type: s.mime || "audio/webm"});
-  const texto = ((s.texto || "") + " " + (s.parcial || "")).replace(/\s+/g," ").trim();
-
-  if(blob.size < 400 && !texto){ render(); toast("Gravação muito curta, descartada."); return; }
-
-  const g = {id:uid(), blob, dur, tipoMime:blob.type, data:todayISO(), hora:nowHM(),
-             status:"pendente", texto: texto || null, areaId:null, criadoEm:new Date().toISOString()};
-  await put("gravacoes", g); S.gravacoes.push(g);
-
-  if(!texto){
-    render();
-    toast(s.erro === "network" ? "Sem internet pra entender agora. O áudio ficou guardado em Gravações."
-        : s.erro === "sem-suporte" ? "Este navegador não entende voz. O áudio ficou guardado em Gravações."
-        : "Não entendi nada. O áudio ficou guardado em Gravações.");
+  if(sess.erro && !t && !p){
+    const msg = sess.erro === "network" ? "Sem internet pra entender agora…"
+              : sess.erro === "no-speech" ? "Não ouvi nada ainda. Fale mais perto…"
+              : sess.erro === "audio-capture" ? "O microfone está ocupado por outro app."
+              : sess.erro === "not-allowed" || sess.erro === "service-not-allowed" ? "Permissão de microfone negada."
+              : "Tentando ouvir…";
+    box.innerHTML = '<span class="par">' + esc(msg) + '</span>';
     return;
   }
-  telaConfirmar(texto, interpretar(texto), g);
+  box.innerHTML = (t || p)
+    ? esc(t) + (p ? ' <span class="par">' + esc(p) + '</span>' : "")
+    : '<span class="par">Pode falar…</span>';
 }
 
 let audioAtual = null, audioId = null;
@@ -506,12 +557,21 @@ const NUM_PT = {zero:0,um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,s
   dezenove:19,vinte:20,trinta:30,quarenta:40,cinquenta:50,sessenta:60,setenta:70,oitenta:80,noventa:90,
   cem:100,cento:100,duzentos:200,trezentos:300,quatrocentos:400,quinhentos:500,meio:0.5,meia:0.5};
 
+/* "meio" quase sempre é lugar ("canteiro do meio"), não metade.
+   Só vira 0,5 quando vem colado numa unidade: "meia hora", "meio litro". */
+const UNIDADE_TOK = /^(hora|horas|minuto|minutos|litro|litros|quilo|quilos|kg|grama|gramas|dia|dias)$/;
+
 function numerosParaDigitos(txt){
   const toks = txt.split(" ");
   const limpo = t => t.replace(/[.,;:!?]/g,"");
+  const ehNumero = (tok, prox) => {
+    if(NUM_PT[tok] === undefined) return false;
+    if((tok === "meio" || tok === "meia") && !UNIDADE_TOK.test(limpo(prox||""))) return false;
+    return true;
+  };
   const out = []; let i = 0;
   while(i < toks.length){
-    if(NUM_PT[limpo(toks[i])] === undefined){ out.push(toks[i]); i++; continue; }
+    if(!ehNumero(limpo(toks[i]), toks[i+1])){ out.push(toks[i]); i++; continue; }
     let val = NUM_PT[limpo(toks[i])]; i++;
     while(i+1 < toks.length && limpo(toks[i]) === "e" && NUM_PT[limpo(toks[i+1])] !== undefined){
       val += NUM_PT[limpo(toks[i+1])]; i += 2;
@@ -547,32 +607,58 @@ function casar(texto, itens, apelidosDe){
     });
   });
   if(melhor) return {item:melhor, exato:true};
-  /* tentativa mais frouxa: a maioria das palavras significativas aparece */
+  /* tentativa mais frouxa — mas exigente de propósito: precisa de pelo menos duas
+     palavras significativas batendo. Sem isso, "estufa nova" seria confundida com
+     "Estufa 1" e o registro iria pro lugar errado calado. Melhor perguntar. */
   itens.forEach(it => {
     const cands = [it.nome].concat(apelidosDe ? (apelidosDe(it)||[]) : []);
     cands.forEach(c => {
       const toks = semAcento(c).split(" ").filter(x => x.length > 2);
-      if(!toks.length) return;
+      if(toks.length < 2) return;
       const achou = toks.filter(x => t.includes(x)).length;
-      const score = achou / toks.length;
-      if(score >= 0.6 && achou > melhorTam){ melhor = it; melhorTam = achou; }
+      if(achou >= 2 && achou / toks.length >= 0.6 && achou > melhorTam){ melhor = it; melhorTam = achou; }
     });
   });
   return melhor ? {item:melhor, exato:false} : null;
 }
 
-/* tenta achar um nome de lugar que ainda não existe: "na linha dos tomates", "a horta do fundo" */
+/* tenta achar um nome de lugar que ainda não existe.
+   Primeiro olha logo depois do verbo ("reguei A ESTUFA 1 por..."), que é onde o nome
+   quase sempre está. Só se isso falhar é que tenta pela preposição. */
+const NAO_E_AREA = /^(agua|terra|solo|chao|folha|folhas|planta|plantas|ponta|cima|baixo|fundo|manha|tarde|noite|hoje|ontem|anteontem|mangueira|gotejo|aspersao|aspersor|microaspersao|micro aspersao|regador|balde|manual|foliar|cobertura|fertirrigacao|muda|mudas|litro|litros|quilo|quilos)$/;
+
+const APOS_VERBO = /\b(?:reguei|regamos|regei|irriguei|irrigamos|molhei|molhamos|aguei|apliquei|aplicamos|adubei|adubamos|pulverizei|espalhei|botei|coloquei|passei|joguei|usei|plantei|plantamos|semeei|colhi|colhemos|tirei)\s+(?:[ao]s?\s+)?([a-z0-9][a-z0-9 ]{2,40})/;
+
+const CORTA_AREA = /\b(por|durante|com|de|minutos?|min|horas?|litros?|quilos?|kg|gramas?|hoje|ontem|anteontem|manha|tarde|noite|cada|dias?|semanas?|mes|meses|e)\b/;
+
+function aparaArea(frase){
+  if(!frase) return "";
+  const c = frase.search(CORTA_AREA);
+  if(c > 0) frase = frase.slice(0, c);
+  return frase.trim().replace(/\s+/g," ");
+}
+
+function validaArea(frase){
+  if(!frase) return null;
+  const n = frase.split(" ").length;
+  if(frase.length < 3 || n > 4) return null;
+  if(NAO_E_AREA.test(frase)) return null;
+  if(/^\d+$/.test(frase)) return null;
+  return frase.replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function candidatoArea(texto){
   const t = semAcento(texto);
+
+  const mv = t.match(APOS_VERBO);
+  if(mv){
+    const ok = validaArea(aparaArea(mv[1]));
+    if(ok) return ok;
+  }
+
   const m = t.match(/\b(na|no|nas|nos|em|do|da|dos|das)\s+((?:[a-z0-9]+\s+){0,3}[a-z0-9]+)/);
   if(!m) return null;
-  const corta = /\b(por|durante|com|de|minutos?|min|horas?|litros?|quilos?|kg|gramas?|hoje|ontem|anteontem|manha|tarde|noite|cada|dias?|semanas?|mes|meses)\b/;
-  let frase = m[2];
-  const c = frase.search(corta);
-  if(c > 0) frase = frase.slice(0, c);
-  frase = frase.trim().replace(/\s+/g," ");
-
-  /* genitivo: em "horta do fundo" o nome comeca antes do "do" */
+  let frase = aparaArea(m[2]);
   if(/^d[ao]s?$/.test(m[1])){
     const antes = t.slice(0, m.index).trim().split(" ");
     const ant = antes[antes.length-1] || "";
@@ -580,10 +666,7 @@ function candidatoArea(texto){
        && !/^\d+$/.test(ant) && !temVerbo(ant))
       frase = ant + " " + m[1] + " " + frase;
   }
-
-  if(frase.length < 3 || frase.split(" ").length > 4) return null;
-  if(/^(agua|terra|solo|chao|folha|folhas|planta|plantas|manha|tarde|noite|ponta|cima|baixo)$/.test(frase)) return null;
-  return frase.replace(/\b\w/g, c => c.toUpperCase());
+  return validaArea(frase);
 }
 
 function temVerbo(frag){
@@ -988,15 +1071,17 @@ function telaConfirmar(texto, drafts, g){
       if(d.tipo === "insumo" && !d.insumoId) return showErr(eb, "Falta dizer qual insumo. Toque em “editar” ou crie o insumo.");
       if(d.tipo === "plantio" && !d.cultura) return showErr(eb, "Falta dizer o que foi plantado. Toque em “editar”.");
     }
-    g.status = "processada";
-    g.areaId = (drafts[0] && drafts[0].areaId) || null;
-    await put("gravacoes", g);
+    if(g){
+      g.status = "processada";
+      g.areaId = (drafts[0] && drafts[0].areaId) || null;
+      await put("gravacoes", g);
+    }
 
     for(const d of drafts){
       const r = Object.assign({}, d);
       delete r.areaSugerida; delete r.insumoSugerido;
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
-      r.id = uid(); r.gravacaoId = g.id; r.fala = texto; r.criadoEm = new Date().toISOString();
+      r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
       if(r.tipo === "plantio"){
         const p = {id:uid(), areaId:r.areaId, cultura:r.cultura, variedade:r.variedade||"",
                    dataPlantio:r.data, quantidade:r.quantidade||null, previsao:r.previsao||null,
@@ -1010,7 +1095,7 @@ function telaConfirmar(texto, drafts, g){
     toast(drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos");
   };
 
-  const descartar = () => confirmDel("Descartar o que você falou?","O áudio continua guardado em Gravações, mas nada entra no diário.", async () => {
+  const descartar = () => confirmDel("Descartar o que você falou?", g ? "O áudio continua guardado em Gravações, mas nada entra no diário." : "Nada será salvo no diário.", async () => {
     closeSheet(); render(); toast("Descartado");
   });
 
@@ -1090,7 +1175,7 @@ function screenHome(){
     h.appendChild(a);
   } else if(!falaSuportada()){
     const a=el("div","empty"); a.style.marginTop="26px"; a.style.fontSize="14px";
-    a.innerHTML="<b>Este navegador não transcreve voz.</b><br>Use o Chrome. Por enquanto o app só guarda o áudio do que você falar.";
+    a.innerHTML="<b>Este navegador não entende voz.</b><br>Use o Chrome. Por aqui o app só guarda o áudio do que você falar, sem transcrever.";
     h.appendChild(a);
   }
   v.appendChild(h);
