@@ -233,8 +233,8 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=2;
-const STORES=["areas","insumos","plantios","registros","gravacoes","config"];
+const DB_NAME="caderno-campo", DB_VER=3;
+const STORES=["areas","insumos","plantios","registros","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -245,16 +245,43 @@ function open(){
   });
 }
 function tx(store,mode){ return _db.transaction(store,mode).objectStore(store); }
-function put(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").put(obj); r.onsuccess=()=>ok(obj); r.onerror=e=>err(e.target.error); }); }
-function del(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
+function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").put(obj); r.onsuccess=()=>ok(obj); r.onerror=e=>err(e.target.error); }); }
+function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
+
+/* o que viaja pra nuvem */
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", registros:"registro"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", registro:"registros"};
+
+async function marcarPendente(loja, id, apagado, quando){
+  const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
+  const p = {id: loja + ":" + id, loja, oid: id, tipo, apagado: !!apagado, atualizadoEm: quando};
+  await putBruto("pendentes", p);
+  const ix = S.pendentes.findIndex(x => x.id === p.id);   /* a lista viva também precisa saber */
+  if(ix >= 0) S.pendentes[ix] = p; else S.pendentes.push(p);
+  agendarSync();
+}
+
+async function put(store,obj){
+  if(TIPO_DA_LOJA[store]){
+    obj.atualizadoEm = new Date().toISOString();
+    await putBruto(store,obj);
+    await marcarPendente(store, obj.id, false, obj.atualizadoEm);
+    return obj;
+  }
+  return putBruto(store,obj);
+}
+async function del(store,id){
+  await delBruto(store,id);
+  if(TIPO_DA_LOJA[store]) await marcarPendente(store, id, true, new Date().toISOString());
+}
 function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly").getAll(); r.onsuccess=()=>ok(r.result||[]); r.onerror=e=>err(e.target.error); }); }
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], registros:[], gravacoes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], registros:[], gravacoes:[], pendentes:[], config:{} };
 async function load(){
-  const [a,i,p,r,g,c] = await Promise.all(STORES.map(all));
-  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.gravacoes=g;
+  const [a,i,p,r,g,pe,c] = await Promise.all(STORES.map(all));
+  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.gravacoes=g; S.pendentes=pe;
   S.config = (c.find(x=>x.id==="app")||{id:"app"});
 }
 const areaById = id => S.areas.find(a=>a.id===id);
@@ -559,7 +586,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const VOCAB_VERSAO = 1;
+const VOCAB_VERSAO = 2;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -580,6 +607,73 @@ const VOCAB_INSUMOS = [
   {nome:"Esterco",              tipo:"Adubo",           unidade:"kg", apelidos:["esterco de gado","estrume","isterco","esterço"]}
 ];
 
+/* Junta áreas e insumos que são a mesma coisa escrita de outro jeito
+   ("Linha Dos Tomates" e "Linha do tomate"). Os registros da duplicata passam
+   pro sobrevivente, e a frequência que o Rob já tinha definido é preservada. */
+async function juntarDuplicatas(){
+  let juntadas = 0;
+
+  /* Cada área existente escolhe o SEU melhor par no vocabulário.
+     Sem isso, "Linha Piscina 2A" e "2B" (94% parecidas) virariam uma só. */
+  const agrupar = (itens, vocab) => {
+    const grupos = new Map();
+    itens.forEach(it => {
+      const n = normalizarFala(it.nome);
+      let melhor = null;
+      vocab.forEach(v => {
+        const s = parecido(n, normalizarFala(v.nome));
+        if(!melhor || s > melhor.s) melhor = {s, v};
+      });
+      if(melhor && melhor.s >= 0.8){
+        if(!grupos.has(melhor.v.nome)) grupos.set(melhor.v.nome, {v: melhor.v, itens: []});
+        grupos.get(melhor.v.nome).itens.push(it);
+      }
+    });
+    return grupos;
+  };
+
+  for(const {v, itens} of agrupar(S.areas, VOCAB_AREAS).values()){
+    const alvo = normalizarFala(v.nome);
+    const fica = itens.find(a => normalizarFala(a.nome) === alvo) || itens[0];
+    fica.nome = v.nome;
+    if(!fica.tipo) fica.tipo = v.tipo;
+
+    for(const o of itens.filter(a => a.id !== fica.id)){
+      fica.apelidos = [...new Set((fica.apelidos||[]).concat(o.apelidos||[]))];
+      if(!fica.frequencia && o.frequencia) fica.frequencia = o.frequencia;
+      if(!fica.cultura && o.cultura) fica.cultura = o.cultura;
+      if(!fica.obs && o.obs) fica.obs = o.obs;
+      for(const r of S.registros)  if(r.areaId === o.id){ r.areaId = fica.id; await put("registros", r); }
+      for(const pl of S.plantios)  if(pl.areaId === o.id){ pl.areaId = fica.id; await put("plantios", pl); }
+      for(const g of S.gravacoes)  if(g.areaId === o.id){ g.areaId = fica.id; await put("gravacoes", g); }
+      await del("areas", o.id);
+      S.areas = S.areas.filter(a => a.id !== o.id);
+      juntadas++;
+    }
+    fica.apelidos = [...new Set((fica.apelidos||[]).concat(v.apelidos))];
+    await put("areas", fica);
+  }
+
+  for(const {v, itens} of agrupar(S.insumos, VOCAB_INSUMOS).values()){
+    const fica = itens.find(i => i.nome === v.nome) || itens[0];
+    fica.nome = v.nome;
+    if(!fica.tipo) fica.tipo = v.tipo;
+    fica.unidade = v.unidade;
+
+    for(const o of itens.filter(i => i.id !== fica.id)){
+      fica.apelidos = [...new Set((fica.apelidos||[]).concat(o.apelidos||[]))];
+      if(!fica.carencia && o.carencia) fica.carencia = o.carencia;
+      for(const r of S.registros) if(r.insumoId === o.id){ r.insumoId = fica.id; await put("registros", r); }
+      await del("insumos", o.id);
+      S.insumos = S.insumos.filter(i => i.id !== o.id);
+      juntadas++;
+    }
+    fica.apelidos = [...new Set((fica.apelidos||[]).concat(v.apelidos))];
+    await put("insumos", fica);
+  }
+  return juntadas;
+}
+
 /* Instala o vocabulário sem duplicar nada. Se já existe algo com o mesmo nome,
    só completa o que estiver faltando (apelidos, unidade) — não sobrescreve. */
 async function instalarVocabulario(){
@@ -594,8 +688,9 @@ async function instalarVocabulario(){
       if(ja.apelidos.length !== antes){ await put("areas", ja); completadas++; }
       continue;
     }
-    const o = {id:uid(), nome:v.nome, tipo:v.tipo, frequencia:null, cultura:"",
-               apelidos:v.apelidos, obs:"", criadoEm:new Date().toISOString()};
+    /* id fixo: assim dois aparelhos criam a MESMA área e a sincronia não duplica */
+    const o = {id:"area-"+normalizarFala(v.nome).replace(/\s+/g,"-"), nome:v.nome, tipo:v.tipo,
+               frequencia:null, cultura:"", apelidos:v.apelidos, obs:"", criadoEm:new Date().toISOString()};
     await put("areas", o); S.areas.push(o); novas++;
   }
 
@@ -609,8 +704,8 @@ async function instalarVocabulario(){
       if(ja.apelidos.length !== antes || !ja.unidade){ await put("insumos", ja); completadas++; }
       continue;
     }
-    const o = {id:uid(), nome:v.nome, tipo:v.tipo, unidade:v.unidade, apelidos:v.apelidos,
-               carencia:null, obs:"", criadoEm:new Date().toISOString()};
+    const o = {id:"insumo-"+normalizarFala(v.nome).replace(/\s+/g,"-"), nome:v.nome, tipo:v.tipo,
+               unidade:v.unidade, apelidos:v.apelidos, carencia:null, obs:"", criadoEm:new Date().toISOString()};
     await put("insumos", o); S.insumos.push(o); novosIns++;
   }
   return {novas, novosIns, completadas};
@@ -1619,9 +1714,19 @@ function screenMais(){
   c2.appendChild(item("&#9997;","Registrar sem falar","",()=>escolherTipo({})));
   v.appendChild(c2);
 
+  const cS=el("div","card"); cS.style.marginTop="18px";
+  cS.appendChild(item("&#9729;","Sincronia e backup",
+    S.config.caderno ? (S.pendentes.length ? S.pendentes.length+" esperando" : "ligada") : "desligada",
+    screenSincronia));
+  v.appendChild(cS);
+
   const c3=el("div","card"); c3.style.marginTop="18px";
   c3.appendChild(item("&#128190;","Exportar backup","",exportar));
   c3.appendChild(item("&#128228;","Importar backup","",importar));
+  c3.appendChild(item("&#128260;","Juntar áreas repetidas","", async()=>{
+    const n = await juntarDuplicatas(); await load(); render();
+    toast(n ? "Juntei "+n+" repetida(s)" : "Nenhuma repetida");
+  }));
   c3.appendChild(item("&#128221;","Recarregar meu vocabulário","áreas e insumos", async()=>{
     const r = await instalarVocabulario(); render();
     toast(r.novas || r.novosIns || r.completadas
@@ -1697,6 +1802,156 @@ function verPlantio(p){
     ? btn("Encerrar plantio","pri",async()=>{ p.status="encerrado"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio encerrado"); })
     : btn("Reabrir","pri",async()=>{ p.status="ativo"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio reaberto"); }));
   openSheet(p.cultura,w,foot);
+}
+
+
+/* ============ sincronia ============ */
+const SYNC_URL_PADRAO = "https://tmzirofxoghzfkrsvbit.supabase.co/functions/v1/sync";
+const syncUrl = () => window.__syncUrl || SYNC_URL_PADRAO;
+
+function novoCaderno(){
+  const a = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let x = "";
+  const buf = new Uint8Array(24);
+  (window.crypto || {}).getRandomValues ? crypto.getRandomValues(buf) : buf.forEach((_,i)=>buf[i]=i*7);
+  for(const b of buf) x += a[b % a.length];
+  return x;
+}
+const codigoBonito = c => (c||"").replace(/(.{6})/g, "$1 ").trim();
+
+let sincronizando = false, timerSync = null;
+function agendarSync(){
+  if(!S.config.caderno) return;
+  clearTimeout(timerSync);
+  timerSync = setTimeout(() => sincronizar(true), 4000);
+}
+
+async function sincronizar(silencioso){
+  if(sincronizando || !S.config.caderno) return;
+  if(!navigator.onLine){ if(!silencioso) toast("Sem internet agora. Vai sincronizar quando voltar."); return; }
+  sincronizando = true;
+  if(!silencioso) toast("Sincronizando…");
+  try{
+    const pend = S.pendentes.slice();
+    const mudancas = [];
+    for(const p of pend){
+      if(p.apagado){ mudancas.push({id:p.oid, tipo:p.tipo, dados:null, apagado:true, atualizadoEm:p.atualizadoEm}); continue; }
+      const obj = (S[p.loja] || []).find(x => x.id === p.oid);
+      if(!obj) continue;
+      const dados = Object.assign({}, obj);
+      delete dados.foto;                         /* foto não viaja: fica no aparelho */
+      mudancas.push({id:obj.id, tipo:p.tipo, dados, apagado:false, atualizadoEm:obj.atualizadoEm || p.atualizadoEm});
+    }
+
+    const res = await fetch(syncUrl(), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({caderno:S.config.caderno, desde:S.config.syncEm || null, mudancas})
+    });
+    if(!res.ok) throw new Error("servidor respondeu " + res.status);
+    const j = await res.json();
+    if(j.erro) throw new Error(j.erro);
+
+    let recebidas = 0;
+    for(const m of (j.mudancas || [])){
+      const loja = LOJA_DO_TIPO[m.tipo]; if(!loja) continue;
+      const local = (S[loja] || []).find(x => x.id === m.id);
+      if(m.apagado){
+        if(local){ await delBruto(loja, m.id); S[loja] = S[loja].filter(x => x.id !== m.id); recebidas++; }
+        continue;
+      }
+      if(!m.dados) continue;
+      if(local && local.atualizadoEm && local.atualizadoEm >= m.atualizadoEm) continue;
+      const novo = Object.assign({}, m.dados, {atualizadoEm: m.atualizadoEm});
+      if(local && local.foto) novo.foto = local.foto;
+      await putBruto(loja, novo);
+      const ix = S[loja].findIndex(x => x.id === m.id);
+      if(ix >= 0) S[loja][ix] = novo; else S[loja].push(novo);
+      recebidas++;
+    }
+
+    for(const p of pend){
+      const atual = S.pendentes.find(x => x.id === p.id);
+      if(atual && atual.atualizadoEm === p.atualizadoEm) await delBruto("pendentes", p.id);
+    }
+    S.pendentes = await all("pendentes");
+    await saveCfg({syncEm: j.agora, syncQuando: new Date().toISOString()});
+    render();
+    if(!silencioso) toast(mudancas.length || recebidas
+      ? "Pronto · enviei " + mudancas.length + ", recebi " + recebidas
+      : "Já estava tudo sincronizado");
+    return {enviadas: mudancas.length, recebidas};
+  }catch(e){
+    console.error("sync", e);
+    if(!silencioso) toast("Não consegui sincronizar: " + e.message);
+  }finally{ sincronizando = false; }
+}
+
+function screenSincronia(){
+  head("Sincronia",""); tab="mais"; stack=null;
+  const v = $("#view"); v.innerHTML = "";
+
+  if(!S.config.caderno){
+    const e = el("div","empty"); e.style.textAlign = "left";
+    e.innerHTML = "<b>Seus dados estão só neste aparelho.</b><br><br>" +
+      "Se ele quebrar ou você limpar o navegador, acabou. Ligando a sincronia, tudo fica guardado também na nuvem — " +
+      "e você passa a ver a mesma coisa no celular e no computador.";
+    v.appendChild(e);
+
+    const b1 = btn("Ligar a sincronia","pri", async () => {
+      await saveCfg({caderno: novoCaderno(), syncEm: null});
+      await sincronizar(false);
+      screenSincronia();
+    });
+    b1.style.marginTop = "16px"; v.appendChild(b1);
+
+    const s2 = el("div","sec"); s2.style.marginTop = "26px";
+    s2.appendChild(el("div","sec-t","Já liguei em outro aparelho"));
+    const inp = input("text","","cole o código do caderno aqui");
+    s2.appendChild(inp);
+    const b2 = btn("Entrar neste caderno","sec", async () => {
+      const c = (inp.value||"").replace(/\s/g,"").toLowerCase();
+      if(!/^[a-z0-9]{16,64}$/.test(c)) return toast("Código inválido.");
+      await saveCfg({caderno: c, syncEm: null});
+      await sincronizar(false);
+      screenSincronia();
+    });
+    b2.style.marginTop = "10px"; b2.style.flex = "1"; s2.appendChild(b2);
+    v.appendChild(s2);
+  } else {
+    const c = el("div","card"); c.style.padding = "4px 16px";
+    const kv = (k,val) => { const d = el("div","kv"); d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
+    kv("Situação", navigator.onLine ? "ligada" : "ligada (sem internet agora)");
+    kv("Última vez", S.config.syncQuando ? fmtDay(S.config.syncQuando.slice(0,10)) + " às " + S.config.syncQuando.slice(11,16) : "ainda não");
+    kv("Esperando enviar", S.pendentes.length);
+    v.appendChild(c);
+
+    const s2 = el("div","sec"); s2.style.marginTop = "20px";
+    s2.appendChild(el("div","sec-t","Código deste caderno"));
+    const cod = el("div","card");
+    cod.style.cssText = "padding:16px;font-size:19px;letter-spacing:.09em;font-weight:700;word-break:break-all;text-align:center";
+    cod.textContent = codigoBonito(S.config.caderno);
+    s2.appendChild(cod);
+    const dica = el("div","hint");
+    dica.style.marginTop = "8px";
+    dica.textContent = "Digite este código no outro aparelho pra ele enxergar o mesmo caderno. Guarde num lugar seguro — quem tiver ele vê seus registros.";
+    s2.appendChild(dica);
+    const bc = btn("Copiar código","sec", async () => {
+      try { await navigator.clipboard.writeText(S.config.caderno); toast("Copiado"); }
+      catch(e){ toast("Anote o código à mão."); }
+    });
+    bc.style.marginTop = "12px"; bc.style.flex = "1"; s2.appendChild(bc);
+    v.appendChild(s2);
+
+    const b1 = btn("Sincronizar agora","pri", () => sincronizar(false));
+    b1.style.marginTop = "6px"; v.appendChild(b1);
+
+    const b2 = btn("Desligar a sincronia","dng", () => confirmDel("Desligar a sincronia?",
+      "Os dados continuam neste aparelho e o que já subiu continua na nuvem. Só para de enviar.",
+      async () => { await saveCfg({caderno:null}); closeSheet(); screenSincronia(); toast("Sincronia desligada"); }));
+    b2.style.marginTop = "10px"; b2.style.flex = "1"; v.appendChild(b2);
+  }
+
+  const vt = btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop = "18px"; vt.style.flex = "1"; v.appendChild(vt);
 }
 
 /* ============ backup ============ */
@@ -1780,18 +2035,24 @@ async function exemplos(){
   try{
     await open(); await load();
     if(S.config.vocab !== VOCAB_VERSAO){          /* instala uma vez, mesmo já tendo registros */
+      await juntarDuplicatas();
       await instalarVocabulario();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
     render();
+    if(S.config.caderno){
+      sincronizar(true);
+      window.addEventListener("online", () => sincronizar(true));
+      setInterval(() => sincronizar(true), 5*60*1000);
+    }
   }
   catch(e){
     $("#view").innerHTML='<div class="empty"><b>Não consegui abrir o banco de dados.</b><br>Se você estiver numa aba anônima, tente numa aba normal.</div>';
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
