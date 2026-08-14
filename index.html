@@ -552,6 +552,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
+const VOCAB_VERSAO = 1;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita"]},
@@ -572,21 +573,40 @@ const VOCAB_INSUMOS = [
   {nome:"Esterco",              tipo:"Adubo",           unidade:"kg", apelidos:["esterco de gado","estrume"]}
 ];
 
+/* Instala o vocabulário sem duplicar nada. Se já existe algo com o mesmo nome,
+   só completa o que estiver faltando (apelidos, unidade) — não sobrescreve. */
 async function instalarVocabulario(){
-  let novas = 0, novosIns = 0;
+  let novas = 0, novosIns = 0, completadas = 0;
+
   for(const v of VOCAB_AREAS){
-    if(S.areas.some(a => semAcento(a.nome) === semAcento(v.nome))) continue;
+    const ja = S.areas.find(a => semAcento(a.nome) === semAcento(v.nome));
+    if(ja){
+      const antes = (ja.apelidos||[]).length;
+      ja.apelidos = [...new Set((ja.apelidos||[]).concat(v.apelidos))];
+      if(!ja.tipo) ja.tipo = v.tipo;
+      if(ja.apelidos.length !== antes){ await put("areas", ja); completadas++; }
+      continue;
+    }
     const o = {id:uid(), nome:v.nome, tipo:v.tipo, frequencia:null, cultura:"",
                apelidos:v.apelidos, obs:"", criadoEm:new Date().toISOString()};
     await put("areas", o); S.areas.push(o); novas++;
   }
+
   for(const v of VOCAB_INSUMOS){
-    if(S.insumos.some(i => semAcento(i.nome) === semAcento(v.nome))) continue;
+    const ja = S.insumos.find(i => semAcento(i.nome) === semAcento(v.nome));
+    if(ja){
+      const antes = (ja.apelidos||[]).length;
+      ja.apelidos = [...new Set((ja.apelidos||[]).concat(v.apelidos))];
+      if(!ja.unidade) ja.unidade = v.unidade;
+      if(!ja.tipo) ja.tipo = v.tipo;
+      if(ja.apelidos.length !== antes || !ja.unidade){ await put("insumos", ja); completadas++; }
+      continue;
+    }
     const o = {id:uid(), nome:v.nome, tipo:v.tipo, unidade:v.unidade, apelidos:v.apelidos,
                carencia:null, obs:"", criadoEm:new Date().toISOString()};
     await put("insumos", o); S.insumos.push(o); novosIns++;
   }
-  return {novas, novosIns};
+  return {novas, novosIns, completadas};
 }
 
 /* ============ interpretador (vocabulário fechado) ============ */
@@ -1519,7 +1539,9 @@ function screenMais(){
   c3.appendChild(item("&#128228;","Importar backup","",importar));
   c3.appendChild(item("&#128221;","Recarregar meu vocabulário","áreas e insumos", async()=>{
     const r = await instalarVocabulario(); render();
-    toast(r.novas || r.novosIns ? "Repus "+r.novas+" área(s) e "+r.novosIns+" insumo(s)" : "Já estava tudo lá");
+    toast(r.novas || r.novosIns || r.completadas
+      ? "Repus "+r.novas+" área(s), "+r.novosIns+" insumo(s)"+(r.completadas?" e completei "+r.completadas:"")
+      : "Já estava tudo lá");
   }));
   c3.appendChild(item("&#128465;","Apagar tudo","",apagarTudo));
   v.appendChild(c3);
@@ -1672,8 +1694,9 @@ async function exemplos(){
 (async function(){
   try{
     await open(); await load();
-    if(!S.areas.length && !S.registros.length && !S.gravacoes.length){
+    if(S.config.vocab !== VOCAB_VERSAO){          /* instala uma vez, mesmo já tendo registros */
       await instalarVocabulario();
+      await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
     render();
