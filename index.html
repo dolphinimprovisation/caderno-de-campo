@@ -63,6 +63,13 @@ main{padding:16px 16px 8px}
 .mic svg{width:66px;height:66px}
 .miclb{margin-top:18px;font-size:17px;font-weight:650;color:var(--ink2)}
 .mictime{font-variant-numeric:tabular-nums;color:var(--red)}
+.fala-viva{margin-top:18px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;font-size:16.5px;line-height:1.45;text-align:left;min-height:58px;width:100%;max-width:520px;box-shadow:var(--shadow)}
+.fala-viva .par{color:var(--ink2)}
+.fala-orig{background:var(--card);border-left:4px solid var(--green);border-radius:0 12px 12px 0;
+  padding:13px 15px;font-size:16px;font-style:italic;color:var(--ink2);margin-bottom:16px}
+.aviso{background:#FDEEDD;color:var(--amber);border-radius:10px;padding:11px 13px;font-size:14.5px;font-weight:600;margin-bottom:14px}
+.falta{color:var(--amber);font-weight:650}
 .pend{margin-top:22px;font-size:15px;color:var(--ink2);padding:9px 16px;border-radius:999px;background:#ECEAE4;font-weight:600}
 .photobtn{margin-top:26px;display:inline-flex;align-items:center;gap:8px;font-size:15.5px;font-weight:650;color:var(--ink2);padding:11px 20px;border:1.5px solid var(--line);border-radius:999px;background:var(--card)}
 
@@ -356,7 +363,7 @@ function chipGroup(options,val){
 }
 function errBox(){ return el("div","err hide"); }
 function showErr(b,m){ b.textContent=m; b.classList.remove("hide"); b.scrollIntoView({block:"nearest"}); }
-function confirmDel(title,msg,fn){ const w=el("div"); w.appendChild(el("p",null,esc(msg))); openSheet(title,w,[btn("Cancelar","sec",closeSheet),btn("Excluir","dng",fn)]); }
+function confirmDel(title,msg,fn){ const w=el("div"); w.appendChild(el("p",null,esc(msg))); openSheet(title,w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Excluir","dng",fn)]); }
 async function saveCfg(patch){ S.config=Object.assign({id:"app"},S.config,patch); await put("config",S.config); }
 
 /* ============ fotos ============ */
@@ -385,49 +392,299 @@ function comprimir(file){
 }
 function imgFrom(blob,cls){ const i=el("img",cls); i.src=URL.createObjectURL(blob); i.onload=()=>{}; return i; }
 
-/* ============ gravacao ============ */
-let rec=null, chunks=[], recStart=0, recTimer=null, recMime="";
+/* ============ fala ao vivo ============ */
+let sess = null;
 function micSuportado(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+function falaSuportada(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
 
-async function toggleRec(){
-  if(rec && rec.state==="recording"){ rec.stop(); return; }
+async function toggleFala(){
+  if(sess){ encerrarFala(); return; }
   if(!micSuportado()){ toast("Este navegador não permite gravar áudio aqui."); return; }
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-    chunks=[];
-    recMime = ["audio/webm;codecs=opus","audio/webm","audio/mp4"].find(m=>window.MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m)) || "";
-    rec = new MediaRecorder(stream, recMime? {mimeType:recMime, audioBitsPerSecond:24000} : {});
-    rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-    rec.onstop = async () => {
-      stream.getTracks().forEach(t=>t.stop());
-      clearInterval(recTimer); recTimer=null;
-      const dur=Math.max(1,Math.round((Date.now()-recStart)/1000));
-      const blob=new Blob(chunks,{type:recMime||"audio/webm"});
-      rec=null;
-      if(blob.size<400){ render(); toast("Gravação muito curta, descartada."); return; }
-      const g={ id:uid(), blob, dur, tipoMime:blob.type, data:todayISO(), hora:nowHM(),
-                status:"pendente", areaId:null, criadoEm:new Date().toISOString() };
-      await put("gravacoes",g); S.gravacoes.push(g);
-      render(); toast("Guardado · "+fmtDur(dur)+" — fica em Gravações até ser processado");
+
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(e){ console.error(e); toast("Não consegui usar o microfone. Verifique a permissão do navegador."); return; }
+
+  const mime = ["audio/webm;codecs=opus","audio/webm","audio/mp4"]
+    .find(m => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+  const mr = new MediaRecorder(stream, mime ? {mimeType:mime, audioBitsPerSecond:24000} : {});
+
+  sess = {mr, stream, chunks:[], inicio:Date.now(), mime, texto:"", parcial:"", erro:null, sr:null, encerrando:false, timer:null};
+  mr.ondataavailable = e => { if(e.data && e.data.size) sess.chunks.push(e.data); };
+  mr.onstop = () => finalizarFala();
+  mr.start();
+
+  if(falaSuportada()){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const sr = new SR();
+    sr.lang = "pt-BR"; sr.continuous = true; sr.interimResults = true; sr.maxAlternatives = 1;
+    sr.onresult = ev => {
+      if(!sess) return;
+      let fin = "", par = "";
+      for(let i = ev.resultIndex; i < ev.results.length; i++){
+        const r = ev.results[i];
+        if(r.isFinal) fin += r[0].transcript + " "; else par += r[0].transcript;
+      }
+      if(fin) sess.texto += fin;
+      sess.parcial = par;
+      pintarFala();
     };
-    rec.start();
-    recStart=Date.now();
-    render();
-    recTimer=setInterval(()=>{ const t=$("#micTime"); if(t) t.textContent=fmtDur(Math.round((Date.now()-recStart)/1000)); },250);
-  }catch(e){
-    console.error(e);
-    toast("Não consegui usar o microfone. Verifique a permissão do navegador.");
+    sr.onerror = ev => { if(sess) sess.erro = ev.error; };
+    sr.onend = () => { if(sess && !sess.encerrando){ try{ sr.start(); }catch(e){} } };
+    try { sr.start(); sess.sr = sr; } catch(e){ sess.erro = "start"; }
+  } else {
+    sess.erro = "sem-suporte";
   }
+
+  render();
+  sess.timer = setInterval(() => {
+    const t = document.getElementById("micTime");
+    if(t && sess) t.textContent = fmtDur(Math.round((Date.now() - sess.inicio)/1000));
+  }, 250);
 }
 
-let audioAtual=null, audioId=null;
-function tocar(g,botao){
-  if(audioAtual){ audioAtual.pause(); audioAtual=null; document.querySelectorAll(".play.on").forEach(b=>{b.classList.remove("on");b.innerHTML="&#9654;";}); if(audioId===g.id){ audioId=null; return; } }
-  const a=new Audio(URL.createObjectURL(g.blob));
-  audioAtual=a; audioId=g.id;
-  botao.classList.add("on"); botao.innerHTML="&#9724;";
-  a.onended=()=>{ botao.classList.remove("on"); botao.innerHTML="&#9654;"; audioAtual=null; audioId=null; };
-  a.play().catch(()=>{ toast("Não consegui tocar o áudio."); botao.classList.remove("on"); botao.innerHTML="&#9654;"; });
+function encerrarFala(){
+  if(!sess || sess.encerrando) return;
+  sess.encerrando = true;
+  clearInterval(sess.timer); sess.timer = null;
+  if(sess.sr){ try{ sess.sr.stop(); }catch(e){} }
+  try { sess.mr.stop(); } catch(e){ finalizarFala(); }
+}
+
+function pintarFala(){
+  const box = document.getElementById("falaViva");
+  if(!box || !sess) return;
+  const t = (sess.texto || "").trim(), p = (sess.parcial || "").trim();
+  box.innerHTML = t || p
+    ? esc(t) + (p ? ' <span class="par">' + esc(p) + '</span>' : "")
+    : '<span class="par">Pode falar…</span>';
+}
+
+async function finalizarFala(){
+  const s = sess; if(!s) return;
+  sess = null;
+  try { s.stream.getTracks().forEach(t => t.stop()); } catch(e){}
+  const dur = Math.max(1, Math.round((Date.now() - s.inicio)/1000));
+  const blob = new Blob(s.chunks, {type: s.mime || "audio/webm"});
+  const texto = ((s.texto || "") + " " + (s.parcial || "")).replace(/\s+/g," ").trim();
+
+  if(blob.size < 400 && !texto){ render(); toast("Gravação muito curta, descartada."); return; }
+
+  const g = {id:uid(), blob, dur, tipoMime:blob.type, data:todayISO(), hora:nowHM(),
+             status:"pendente", texto: texto || null, areaId:null, criadoEm:new Date().toISOString()};
+  await put("gravacoes", g); S.gravacoes.push(g);
+
+  if(!texto){
+    render();
+    toast(s.erro === "network" ? "Sem internet pra entender agora. O áudio ficou guardado em Gravações."
+        : s.erro === "sem-suporte" ? "Este navegador não entende voz. O áudio ficou guardado em Gravações."
+        : "Não entendi nada. O áudio ficou guardado em Gravações.");
+    return;
+  }
+  telaConfirmar(texto, interpretar(texto), g);
+}
+
+let audioAtual = null, audioId = null;
+function tocar(g, botao){
+  if(audioAtual){
+    audioAtual.pause(); audioAtual = null;
+    document.querySelectorAll(".play.on").forEach(b => { b.classList.remove("on"); b.innerHTML = "&#9654;"; });
+    if(audioId === g.id){ audioId = null; return; }
+  }
+  const a = new Audio(URL.createObjectURL(g.blob));
+  audioAtual = a; audioId = g.id;
+  botao.classList.add("on"); botao.innerHTML = "&#9724;";
+  a.onended = () => { botao.classList.remove("on"); botao.innerHTML = "&#9654;"; audioAtual = null; audioId = null; };
+  a.play().catch(() => { toast("Não consegui tocar o áudio."); botao.classList.remove("on"); botao.innerHTML = "&#9654;"; });
+}
+
+/* ============ interpretador de português ============ */
+const semAcento = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+
+const NUM_PT = {zero:0,um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,
+  dez:10,onze:11,doze:12,treze:13,quatorze:14,catorze:14,quinze:15,dezesseis:16,dezessete:17,dezoito:18,
+  dezenove:19,vinte:20,trinta:30,quarenta:40,cinquenta:50,sessenta:60,setenta:70,oitenta:80,noventa:90,
+  cem:100,cento:100,duzentos:200,trezentos:300,quatrocentos:400,quinhentos:500,meio:0.5,meia:0.5};
+
+function numerosParaDigitos(txt){
+  const toks = txt.split(" ");
+  const limpo = t => t.replace(/[.,;:!?]/g,"");
+  const out = []; let i = 0;
+  while(i < toks.length){
+    if(NUM_PT[limpo(toks[i])] === undefined){ out.push(toks[i]); i++; continue; }
+    let val = NUM_PT[limpo(toks[i])]; i++;
+    while(i+1 < toks.length && limpo(toks[i]) === "e" && NUM_PT[limpo(toks[i+1])] !== undefined){
+      val += NUM_PT[limpo(toks[i+1])]; i += 2;
+    }
+    out.push(String(val));
+  }
+  return out.join(" ");
+}
+
+const VERBOS = {
+  plantio:   /\b(plantei|plantamos|semeei|semeamos|mudei de lugar|transplantei)\b/,
+  colheita:  /\b(colhi|colhemos|colheita|tirei)\b/,
+  irrigacao: /\b(irriguei|irrigamos|reguei|regamos|regei|molhei|molhamos|aguei|dei agua|joguei agua|coloquei agua|botei agua)\b/,
+  insumo:    /\b(apliquei|aplicamos|adubei|adubamos|pulverizei|espalhei|botei|coloquei|passei|joguei|usei)\b/,
+  observacao:/\b(notei|reparei|observei|percebi|vi que|esta|estao|apareceu|surgiu)\b/
+};
+
+const METODOS_RE = [[/\bmicro ?aspers/,"Microaspersão"],[/\bgotej/,"Gotejo"],[/\baspers|aspersor/,"Aspersão"],
+                    [/\bmangueir/,"Mangueira"],[/\bregador|balde|manual/,"Manual"]];
+const FORMAS_RE  = [[/\bfertirriga/,"Fertirrigação"],[/\bfoliar|na folha|nas folhas/,"Foliar"],
+                    [/\bno solo|na terra|no chao/,"No solo"],[/\bcobertura/,"Cobertura"]];
+
+/* casa um texto com as áreas ou insumos já cadastrados, usando nome e apelidos */
+function casar(texto, itens, apelidosDe){
+  const t = semAcento(texto);
+  let melhor = null, melhorTam = 0;
+  itens.forEach(it => {
+    const cands = [it.nome].concat(apelidosDe ? (apelidosDe(it)||[]) : []);
+    cands.forEach(c => {
+      const n = semAcento(c);
+      if(n.length < 3) return;
+      if(t.includes(n) && n.length > melhorTam){ melhor = it; melhorTam = n.length; }
+    });
+  });
+  if(melhor) return {item:melhor, exato:true};
+  /* tentativa mais frouxa: a maioria das palavras significativas aparece */
+  itens.forEach(it => {
+    const cands = [it.nome].concat(apelidosDe ? (apelidosDe(it)||[]) : []);
+    cands.forEach(c => {
+      const toks = semAcento(c).split(" ").filter(x => x.length > 2);
+      if(!toks.length) return;
+      const achou = toks.filter(x => t.includes(x)).length;
+      const score = achou / toks.length;
+      if(score >= 0.6 && achou > melhorTam){ melhor = it; melhorTam = achou; }
+    });
+  });
+  return melhor ? {item:melhor, exato:false} : null;
+}
+
+/* tenta achar um nome de lugar que ainda não existe: "na linha dos tomates", "a horta do fundo" */
+function candidatoArea(texto){
+  const t = semAcento(texto);
+  const m = t.match(/\b(na|no|nas|nos|em|do|da|dos|das)\s+((?:[a-z0-9]+\s+){0,3}[a-z0-9]+)/);
+  if(!m) return null;
+  const corta = /\b(por|durante|com|de|minutos?|min|horas?|litros?|quilos?|kg|gramas?|hoje|ontem|anteontem|manha|tarde|noite|cada|dias?|semanas?|mes|meses)\b/;
+  let frase = m[2];
+  const c = frase.search(corta);
+  if(c > 0) frase = frase.slice(0, c);
+  frase = frase.trim().replace(/\s+/g," ");
+
+  /* genitivo: em "horta do fundo" o nome comeca antes do "do" */
+  if(/^d[ao]s?$/.test(m[1])){
+    const antes = t.slice(0, m.index).trim().split(" ");
+    const ant = antes[antes.length-1] || "";
+    if(ant.length > 2 && !/^(a|o|as|os|na|no|nas|nos|em|de|por|com|uma?)$/.test(ant)
+       && !/^\d+$/.test(ant) && !temVerbo(ant))
+      frase = ant + " " + m[1] + " " + frase;
+  }
+
+  if(frase.length < 3 || frase.split(" ").length > 4) return null;
+  if(/^(agua|terra|solo|chao|folha|folhas|planta|plantas|manha|tarde|noite|ponta|cima|baixo)$/.test(frase)) return null;
+  return frase.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function temVerbo(frag){
+  return Object.keys(VERBOS).some(k => k !== "observacao" && VERBOS[k].test(frag));
+}
+
+function fragmentar(txt){
+  const partes = txt.split(/\s+(?:e tambem|tambem|e)\s+/);
+  const frags = [];
+  partes.forEach(p => {
+    if(!frags.length || temVerbo(p)) frags.push(p);
+    else frags[frags.length-1] += " e " + p;
+  });
+  return frags.filter(f => f.trim());
+}
+
+function interpretar(falaOriginal, ctx){
+  ctx = ctx || {};
+  const areas   = ctx.areas   || S.areas;
+  const insumos = ctx.insumos || S.insumos;
+  const hoje    = ctx.hoje    || todayISO();
+
+  const base = numerosParaDigitos(semAcento(falaOriginal));
+  const frags = fragmentar(base);
+  const drafts = [];
+  let areaHerdada = null;
+
+  frags.forEach(frag => {
+    const d = {tipo:"observacao", data:hoje, hora:nowHM(), obs:""};
+
+    /* data relativa */
+    let diasAtras = 0;
+    if(/\banteontem\b/.test(frag)) diasAtras = 2;
+    else if(/\bontem\b/.test(frag)) diasAtras = 1;
+    if(diasAtras) d.data = new Date(dayStart(hoje) - diasAtras*MS_DAY).toISOString().slice(0,10);
+    if(/\bde manha|pela manha\b/.test(frag)) d.hora = "08:00";
+    else if(/\bde tarde|a tarde|pela tarde\b/.test(frag)) d.hora = "15:00";
+
+    /* insumo conhecido */
+    const mi = casar(frag, insumos, () => []);
+    if(mi) d.insumoId = mi.item.id;
+
+    /* tipo */
+    if(VERBOS.plantio.test(frag)) d.tipo = "plantio";
+    else if(VERBOS.colheita.test(frag)) d.tipo = "colheita";
+    else if(mi) d.tipo = "insumo";
+    else if(VERBOS.irrigacao.test(frag)) d.tipo = "irrigacao";
+    else if(VERBOS.insumo.test(frag)) d.tipo = "insumo";
+
+    /* área */
+    const ma = casar(frag, areas, a => a.apelidos);
+    if(ma) { d.areaId = ma.item.id; areaHerdada = ma.item.id; }
+    else if(areaHerdada) d.areaId = areaHerdada;
+    else { const cand = candidatoArea(frag); if(cand) d.areaSugerida = cand; }
+
+    /* números e unidades */
+    const min = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:minutos?|min\b)/);
+    const hrs = frag.match(/(\d+(?:[.,]\d+)?)\s*horas?/);
+    const lit = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:litros?|l\b)/);
+    const kg  = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:quilos?|kg\b)/);
+    const gr  = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:gramas?|g\b)/);
+    const uni = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:mudas?|pes?\b|plantas?|sementes?|covas?)/);
+    const n = x => parseFloat(String(x).replace(",","."));
+
+    if(d.tipo === "irrigacao"){
+      if(min) d.duracao = n(min[1]);
+      else if(hrs) d.duracao = Math.round(n(hrs[1])*60);
+      if(lit) d.volume = n(lit[1]);
+      for(const [re,v] of METODOS_RE) if(re.test(frag)){ d.metodo = v; break; }
+    } else if(d.tipo === "insumo"){
+      if(lit){ d.quantidade = n(lit[1]); d.unidade = "L"; }
+      else if(kg){ d.quantidade = n(kg[1]); d.unidade = "kg"; }
+      else if(gr){ d.quantidade = n(gr[1]); d.unidade = "g"; }
+      for(const [re,v] of FORMAS_RE) if(re.test(frag)){ d.forma = v; break; }
+      if(!d.insumoId){
+        const dep = frag.match(/\b(?:apliquei|adubei|pulverizei|espalhei|botei|coloquei|passei|joguei|usei|com|de)\s+(?:\d+\s*(?:litros?|quilos?|kg|gramas?|g|l)\s+(?:de\s+)?)?([a-z]{3,20})/);
+        if(dep && !/^(agua|na|no|nas|nos|em|uma?|dois|duas)$/.test(dep[1]))
+          d.insumoSugerido = dep[1].replace(/\b\w/, c => c.toUpperCase());
+      }
+    } else if(d.tipo === "plantio"){
+      if(uni) d.quantidade = n(uni[1]);
+      const cult = frag.match(/\bplantei\s+(?:\d+\s+(?:mudas?|pes?|plantas?|sementes?|covas?)\s+(?:de\s+)?)?([a-z]{3,20})/);
+      if(cult && !/^(na|no|nas|nos|em|uma?)$/.test(cult[1])) d.cultura = cult[1].replace(/\b\w/, c => c.toUpperCase());
+    } else if(d.tipo === "colheita"){
+      if(kg){ d.quantidade = n(kg[1]); d.unidade = "kg"; }
+      else if(gr){ d.quantidade = n(gr[1]); d.unidade = "g"; }
+      else if(uni){ d.quantidade = n(uni[1]); d.unidade = "un"; }
+    }
+
+    /* regra falada — ainda não implementada, mas não pode se perder */
+    const regra = frag.match(/\ba cada (\d+) (dias?|semanas?|mes(?:es)?)\b|\btod[oa]s? (?:os |as )?(dias?|semanas?|mes(?:es)?)\b|\bde (\d+) em \d+ dias?\b/);
+    if(regra) d.regraDetectada = regra[0];
+
+    if(d.tipo === "observacao") d.obs = falaOriginal.trim();
+    drafts.push(d);
+  });
+
+  /* se tudo virou observação, junta numa só */
+  if(drafts.length > 1 && drafts.every(d => d.tipo === "observacao"))
+    return [drafts[0]];
+  return drafts;
 }
 
 /* ============ formularios ============ */
@@ -464,7 +721,7 @@ function formIrrigacao(pre){
   w.appendChild(field("Método",fMet));
   const t2=el("div","two"); t2.appendChild(field("Duração (min)",fDur)); t2.appendChild(field("Volume (L)",fVol)); w.appendChild(t2);
   w.appendChild(field("Observação",fObs));
-  openSheet("Registrar irrigação",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  openSheet("Registrar irrigação",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
     const r={id:uid(),tipo:"irrigacao",areaId:fArea.value,data:fData.value||todayISO(),hora:fHora.value,
              metodo:fMet.value(),duracao:num(fDur.value),volume:num(fVol.value),obs:fObs.value.trim(),
@@ -495,7 +752,7 @@ function formInsumo(pre){
   w.appendChild(field("Forma de aplicação",fForma));
   w.appendChild(field("Data",fData));
   w.appendChild(field("Observação",fObs));
-  openSheet("Registrar insumo",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  openSheet("Registrar insumo",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
     if(!fIns.value) return showErr(eb,"Escolha o insumo.");
     const r={id:uid(),tipo:"insumo",areaId:fArea.value,insumoId:fIns.value,quantidade:num(fQtd.value),unidade:fUni.value,
@@ -519,7 +776,7 @@ function formPlantio(pre){
   const t=el("div","two"); t.appendChild(field("Data do plantio",fData)); t.appendChild(field("Quantidade",fQtd)); w.appendChild(t);
   w.appendChild(field("Previsão de colheita",fCol,"Pode deixar em branco."));
   w.appendChild(field("Observação",fObs));
-  openSheet("Registrar plantio",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  openSheet("Registrar plantio",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
     if(!fCult.value.trim()) return showErr(eb,"Diga o que foi plantado.");
     const p={id:uid(),areaId:fArea.value,cultura:fCult.value.trim(),variedade:fVar.value.trim(),
@@ -542,7 +799,7 @@ function formColheita(pre){
   w.appendChild(campoArea(fArea, na=>formColheita(Object.assign(snap(),{areaId:na.id}))));
   const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
   w.appendChild(field("Data",fData)); w.appendChild(field("Observação",fObs));
-  openSheet("Registrar colheita",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  openSheet("Registrar colheita",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
     const r={id:uid(),tipo:"colheita",areaId:fArea.value,quantidade:num(fQtd.value),unidade:fUni.value,
              data:fData.value||todayISO(),hora:pre.hora||nowHM(),obs:fObs.value.trim(),
@@ -573,7 +830,7 @@ function formObs(pre){
   w.appendChild(field("Observação",fTxt));
   w.appendChild(field("Foto",fotoWrap,"A foto fica guardada com a data e a área. Com o tempo vira uma linha do tempo visual pro agente analisar."));
 
-  openSheet("Anotar observação",w,[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  openSheet("Anotar observação",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fTxt.value.trim() && !foto) return showErr(eb,"Escreva algo ou anexe uma foto.");
     const r={id:uid(),tipo:"observacao",areaId:fArea.value||null,data:fData.value||todayISO(),hora:pre.hora||nowHM(),
              obs:fTxt.value.trim(),foto:foto||null,gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
@@ -582,6 +839,7 @@ function formObs(pre){
 }
 
 async function salvarRegistro(r,pre){
+  if(pre && pre.aoSalvar){ pre.aoSalvar(r); return; }
   await put("registros",r); S.registros.push(r);
   if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo||S.config.ultimoMetodo});
   if(pre && pre.gravacaoId){
@@ -592,10 +850,10 @@ async function salvarRegistro(r,pre){
 }
 
 /* ============ cadastros ============ */
-function formArea(existing,then){
+function formArea(existing,then,sugestao){
   const a=existing||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
-  const fNome=input("text",a.nome||"","ex: Estufa 1");
+  const fNome=input("text",a.nome||sugestao||"","ex: Estufa 1");
   const fTipo=chipGroup(TIPOS_AREA,a.tipo||null);
   const fFreq=input("number",a.frequencia||"","ex: 3");
   const fApel=input("text",(a.apelidos||[]).join(", "),"ex: estufa um, estufa de cima");
@@ -605,7 +863,7 @@ function formArea(existing,then){
   w.appendChild(field("Irrigar a cada quantos dias?",fFreq,"É isso que faz a plantinha da tela inicial ficar vermelha quando atrasa. Deixe em branco se você irriga por observação, não por calendário."));
   w.appendChild(field("Como você fala",fApel,"Separe por vírgula. Vai servir pro comando de voz reconhecer a área."));
   w.appendChild(field("Observação",fObs));
-  const foot=[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  const foot=[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fNome.value.trim()) return showErr(eb,"Dê um nome pra área.");
     const o={id:a.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),frequencia:num(fFreq.value),
              apelidos:fApel.value.split(",").map(s=>s.trim()).filter(Boolean),obs:fObs.value.trim(),
@@ -620,10 +878,10 @@ function formArea(existing,then){
   openSheet(existing?"Editar área":"Nova área",w,foot);
 }
 
-function formCadInsumo(existing,then){
+function formCadInsumo(existing,then,sugestao){
   const i=existing||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
-  const fNome=input("text",i.nome||"","ex: Chorume, Bokashi");
+  const fNome=input("text",i.nome||sugestao||"","ex: Chorume, Bokashi");
   const fTipo=chipGroup(TIPOS_INS,i.tipo||null);
   const fUni=chipGroup(UNIDADES,i.unidade||null);
   const fCar=input("number",i.carencia||"","dias");
@@ -631,7 +889,7 @@ function formCadInsumo(existing,then){
   w.appendChild(field("Nome",fNome)); w.appendChild(field("Tipo",fTipo)); w.appendChild(field("Unidade padrão",fUni));
   w.appendChild(field("Carência (dias)",fCar,"Quantos dias esperar entre aplicar e colher. O app te avisa."));
   w.appendChild(field("Observação",fObs));
-  const foot=[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+  const foot=[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fNome.value.trim()) return showErr(eb,"Dê um nome ao insumo.");
     const o={id:i.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),unidade:fUni.value(),
              carencia:num(fCar.value),obs:fObs.value.trim(),criadoEm:i.criadoEm||new Date().toISOString()};
@@ -643,6 +901,120 @@ function formCadInsumo(existing,then){
     await del("insumos",i.id); S.insumos=S.insumos.filter(x=>x.id!==i.id); closeSheet(); screenInsumos(); toast("Insumo excluído");
   })));
   openSheet(existing?"Editar insumo":"Novo insumo",w,foot);
+}
+
+/* ============ tela de confirmação ============ */
+function telaConfirmar(texto, drafts, g){
+  const w = el("div");
+  const eb = errBox(); w.appendChild(eb);
+  w.appendChild(el("div","fala-orig", "“" + esc(texto) + "”"));
+
+  const regra = drafts.find(d => d.regraDetectada);
+  if(regra){
+    const a = el("div","aviso");
+    a.innerHTML = "Você falou <b>“" + esc(regra.regraDetectada) + "”</b>. Regras automáticas ainda não existem — por enquanto isso fica guardado na observação.";
+    w.appendChild(a);
+  }
+
+  const lista = el("div"); w.appendChild(lista);
+
+  const voltar = () => telaConfirmar(texto, drafts, g);
+
+  function editar(ix){
+    const d = drafts[ix];
+    const pre = Object.assign({}, d, {
+      aoSalvar: r => { drafts[ix] = Object.assign({}, r); voltar(); },
+      aoCancelar: voltar
+    });
+    if(d.tipo === "irrigacao") formIrrigacao(pre);
+    else if(d.tipo === "insumo") formInsumo(pre);
+    else if(d.tipo === "plantio") formPlantio(pre);
+    else if(d.tipo === "colheita") formColheita(pre);
+    else formObs(pre);
+  }
+
+  function desenhar(){
+    lista.innerHTML = "";
+    drafts.forEach((d, ix) => {
+      const c = el("div","card"); c.style.marginBottom = "12px";
+      const b = el("button","row");
+      b.appendChild(el("div","dot d-" + d.tipo));
+      const bd = el("div","bd");
+      const a = d.areaId ? areaById(d.areaId) : null;
+      bd.appendChild(el("div","t1", esc(TIPO_LB[d.tipo]) + (a ? " · " + esc(a.nome) : "")));
+      const desc = descRegistro(d);
+      if(desc) bd.appendChild(el("div","t2", esc(desc)));
+      const faltas = [];
+      if(!d.areaId && d.tipo !== "observacao") faltas.push(d.areaSugerida ? "área “" + d.areaSugerida + "” não cadastrada" : "falta a área");
+      if(d.tipo === "insumo" && !d.insumoId) faltas.push(d.insumoSugerido ? "insumo “" + d.insumoSugerido + "” não cadastrado" : "falta o insumo");
+      if(d.tipo === "plantio" && !d.cultura) faltas.push("falta a cultura");
+      if(faltas.length){ const f = el("div","t2 falta", esc(faltas.join(" · "))); bd.appendChild(f); }
+      b.appendChild(bd);
+      b.appendChild(el("div","rt","editar"));
+      b.onclick = () => editar(ix);
+      c.appendChild(b);
+
+      const acts = el("div","grav-acts"); acts.style.padding = "0 14px 14px";
+      if(!d.areaId && d.areaSugerida){
+        const cr = el("button","mini"); cr.textContent = "Criar área “" + d.areaSugerida + "”";
+        cr.onclick = () => formArea(null, nova => {
+          drafts.forEach(x => { if(!x.areaId) x.areaId = nova.id; });
+          voltar();
+        }, d.areaSugerida);
+        acts.appendChild(cr);
+      }
+      if(d.tipo === "insumo" && !d.insumoId && d.insumoSugerido){
+        const ci = el("button","mini"); ci.textContent = "Criar insumo “" + d.insumoSugerido + "”";
+        ci.onclick = () => formCadInsumo(null, novo => {
+          drafts.forEach(x => { if(x.tipo === "insumo" && !x.insumoId){ x.insumoId = novo.id; if(!x.unidade) x.unidade = novo.unidade; } });
+          voltar();
+        }, d.insumoSugerido);
+        acts.appendChild(ci);
+      }
+      if(drafts.length > 1){
+        const rm = el("button","mini d"); rm.textContent = "Remover";
+        rm.onclick = () => { drafts.splice(ix,1); desenhar(); };
+        acts.appendChild(rm);
+      }
+      if(acts.children.length) c.appendChild(acts);
+      lista.appendChild(c);
+    });
+  }
+  desenhar();
+
+  const salvar = async () => {
+    for(const d of drafts){
+      if(d.tipo !== "observacao" && !d.areaId) return showErr(eb, "Falta dizer a área. Toque em “editar” ou crie a área.");
+      if(d.tipo === "insumo" && !d.insumoId) return showErr(eb, "Falta dizer qual insumo. Toque em “editar” ou crie o insumo.");
+      if(d.tipo === "plantio" && !d.cultura) return showErr(eb, "Falta dizer o que foi plantado. Toque em “editar”.");
+    }
+    g.status = "processada";
+    g.areaId = (drafts[0] && drafts[0].areaId) || null;
+    await put("gravacoes", g);
+
+    for(const d of drafts){
+      const r = Object.assign({}, d);
+      delete r.areaSugerida; delete r.insumoSugerido;
+      if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
+      r.id = uid(); r.gravacaoId = g.id; r.fala = texto; r.criadoEm = new Date().toISOString();
+      if(r.tipo === "plantio"){
+        const p = {id:uid(), areaId:r.areaId, cultura:r.cultura, variedade:r.variedade||"",
+                   dataPlantio:r.data, quantidade:r.quantidade||null, previsao:r.previsao||null,
+                   status:"ativo", obs:r.obs||"", criadoEm:new Date().toISOString()};
+        await put("plantios", p); S.plantios.push(p); r.plantioId = p.id;
+      }
+      await put("registros", r); S.registros.push(r);
+      if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo || S.config.ultimoMetodo});
+    }
+    closeSheet(); render();
+    toast(drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos");
+  };
+
+  const descartar = () => confirmDel("Descartar o que você falou?","O áudio continua guardado em Gravações, mas nada entra no diário.", async () => {
+    closeSheet(); render(); toast("Descartado");
+  });
+
+  openSheet("Confira o que entendi", w, [btn("Descartar tudo","sec",descartar), btn("Salvar","pri",salvar)]);
 }
 
 /* ============ navegacao ============ */
@@ -675,7 +1047,7 @@ function render(){
 function screenHome(){
   head("Caderno de Campo", new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"}));
   const v=$("#view");
-  const gravando = !!(rec && rec.state==="recording");
+  const gravando = !!sess;
   const st=statusGeral();
 
   const h=el("div","home");
@@ -688,12 +1060,17 @@ function screenHome(){
   m.innerHTML = gravando
     ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="2.5" width="6" height="11" rx="3" fill="currentColor" stroke="none"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.5"/></svg>';
-  m.onclick=toggleRec;
+  m.onclick=toggleFala;
   mw.appendChild(m);
   const lb=el("div","miclb");
-  if(gravando){ lb.innerHTML='Gravando <span id="micTime" class="mictime">0:00</span> · toque para parar'; }
+  if(gravando) lb.innerHTML='Ouvindo <span id="micTime" class="mictime">0:00</span> · toque para parar';
   else lb.textContent="Toque e fale o que você fez";
   mw.appendChild(lb);
+  if(gravando){
+    const fv=el("div","fala-viva"); fv.id="falaViva";
+    fv.innerHTML='<span class="par">Pode falar…</span>';
+    mw.appendChild(fv);
+  }
   h.appendChild(mw);
 
   const np=pendentes().length;
@@ -709,7 +1086,11 @@ function screenHome(){
 
   if(!micSuportado()){
     const a=el("div","empty"); a.style.marginTop="26px"; a.style.fontSize="14px";
-    a.innerHTML="<b>O microfone não está disponível aqui.</b><br>Isso acontece quando o app é aberto direto de um arquivo. Quando estiver hospedado num endereço https, a gravação funciona.";
+    a.innerHTML="<b>O microfone não está disponível aqui.</b><br>Isso acontece quando o app é aberto direto de um arquivo. Num endereço https funciona.";
+    h.appendChild(a);
+  } else if(!falaSuportada()){
+    const a=el("div","empty"); a.style.marginTop="26px"; a.style.fontSize="14px";
+    a.innerHTML="<b>Este navegador não transcreve voz.</b><br>Use o Chrome. Por enquanto o app só guarda o áudio do que você falar.";
     h.appendChild(a);
   }
   v.appendChild(h);
@@ -722,7 +1103,7 @@ function screenPendentes(){
   const list=pendentes();
   const info=el("div","empty");
   info.style.textAlign="left"; info.style.fontSize="14px"; info.style.marginBottom="18px";
-  info.innerHTML="<b>Estas gravações ainda não foram entendidas pelo app.</b> Quando a transcrição automática estiver pronta (próxima etapa), elas viram registros sozinhas no wifi. Por enquanto você pode ouvir e preencher no dedo.";
+  info.innerHTML="<b>Estas o app não conseguiu entender</b> — normalmente por falta de sinal na hora da fala. O jeito mais rápido de resolver é ouvir e falar de novo.";
   v.appendChild(info);
 
   if(!list.length){ v.appendChild(el("div","empty","Nenhuma gravação esperando.")); }
@@ -738,7 +1119,11 @@ function screenPendentes(){
       bd.appendChild(el("div","t2", fmtDur(g.dur)+" · "+Math.round(g.blob.size/1024)+" KB"));
       top.appendChild(bd);
       box.appendChild(top);
+      if(g.texto){ const q=el("div","fala-orig"); q.style.margin="12px 0 0"; q.textContent="“"+g.texto+"”"; box.appendChild(q); }
       const acts=el("div","grav-acts");
+      const rf=el("button","mini","Falar de novo");
+      rf.onclick=()=>{ go("home"); document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.tab==="home")); setTimeout(toggleFala,250); };
+      acts.appendChild(rf);
       const pr=el("button","mini","Preencher no dedo");
       pr.onclick=()=>escolherTipo({gravacaoId:g.id, data:g.data, hora:g.hora});
       const rm=el("button","mini d","Apagar");
@@ -780,7 +1165,7 @@ function escolherTipo(pre){
   c.appendChild(it("&#127807;","Colheita",()=>formColheita(pre)));
   c.appendChild(it("&#128221;","Observação",()=>formObs(pre)));
   w.appendChild(c);
-  openSheet("O que foi isso?",w,[btn("Cancelar","sec",closeSheet)]);
+  openSheet("O que foi isso?",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet())]);
 }
 
 /* ============ DIÁRIO ============ */
@@ -855,6 +1240,7 @@ function verRegistro(r){
   if(r.tipo==="plantio"){ kv("Cultura",r.cultura); kv("Variedade",r.variedade); kv("Quantidade",r.quantidade); }
   if(r.tipo==="colheita"){ kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); }
   kv("Observação",r.obs);
+  if(r.fala) kv("Você falou","“"+r.fala+"”");
   w.appendChild(c);
   if(r.foto) w.appendChild(imgFrom(r.foto,"photoprev"));
   if(r.gravacaoId){
@@ -1115,7 +1501,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
