@@ -586,7 +586,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const VOCAB_VERSAO = 2;
+const VOCAB_VERSAO = 3;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -676,6 +676,92 @@ async function juntarDuplicatas(){
 
 /* Instala o vocabulário sem duplicar nada. Se já existe algo com o mesmo nome,
    só completa o que estiver faltando (apelidos, unidade) — não sobrescreve. */
+
+/* ---- identificador que nasce do nome ----
+   Se o identificador for sorteado, cada aparelho cria o seu e a sincronia acaba com
+   áreas rivais: o registro de um aponta pra uma área que o outro não conhece.
+   Nascendo do nome, "Linha esquerda" é a mesma coisa em qualquer aparelho, sempre. */
+const idCanonico = (prefixo, nome) => prefixo + "-" + normalizarFala(nome).replace(/\s+/g, "-");
+
+async function repontar(deId, paraId, campo){
+  for(const r of S.registros) if(r[campo] === deId){ r[campo] = paraId; await put("registros", r); }
+  if(campo === "areaId"){
+    for(const p of S.plantios)  if(p.areaId === deId){ p.areaId = paraId; await put("plantios", p); }
+    for(const g of S.gravacoes) if(g.areaId === deId){ g.areaId = paraId; await putBruto("gravacoes", g); }
+  }
+}
+
+async function canonizarIds(){
+  let trocados = 0;
+
+  const arrumar = async (loja, vocab, prefixo, campo) => {
+    for(const v of vocab){
+      const alvo = idCanonico(prefixo, v.nome);
+      const iguais = S[loja].filter(o => normalizarFala(o.nome) === normalizarFala(v.nome));
+      if(!iguais.length) continue;
+
+      let fica = iguais.find(o => o.id === alvo);
+      let resto = iguais.filter(o => o.id !== alvo);
+
+      if(!fica){
+        /* promove o primeiro pro identificador certo, preservando tudo que ele tem */
+        const base = resto.shift();
+        fica = Object.assign({}, base, {id: alvo});
+        await put(loja, fica);
+        S[loja].push(fica);
+        await repontar(base.id, alvo, campo);
+        await del(loja, base.id);
+        S[loja] = S[loja].filter(o => o.id !== base.id);
+        trocados++;
+      }
+
+      for(const o of resto){
+        fica.apelidos = [...new Set((fica.apelidos || []).concat(o.apelidos || []))];
+        if(!fica.frequencia && o.frequencia) fica.frequencia = o.frequencia;
+        if(!fica.cultura && o.cultura) fica.cultura = o.cultura;
+        if(!fica.carencia && o.carencia) fica.carencia = o.carencia;
+        await repontar(o.id, alvo, campo);
+        await del(loja, o.id);
+        S[loja] = S[loja].filter(x => x.id !== o.id);
+        trocados++;
+      }
+      await put(loja, fica);
+    }
+  };
+
+  await arrumar("areas",   VOCAB_AREAS,   "area",   "areaId");
+  await arrumar("insumos", VOCAB_INSUMOS, "insumo", "insumoId");
+  return trocados;
+}
+
+/* ---- registros soltos ----
+   Registro que aponta pra uma área que não existe mais aparece no diário e some das
+   áreas. Como toda gravação guarda a frase original, dá pra reencontrar o lugar sozinho. */
+async function repararOrfaos(){
+  const temArea   = new Set(S.areas.map(a => a.id));
+  const temInsumo = new Set(S.insumos.map(i => i.id));
+  let reparados = 0;
+
+  for(const r of S.registros){
+    let mudou = false;
+
+    if(r.areaId && !temArea.has(r.areaId)){ r.areaId = null; mudou = true; }
+    if(!r.areaId && r.fala){
+      const m = acharNoTexto(normalizarFala(r.fala), S.areas, termosDaArea, 0.72);
+      if(m){ r.areaId = m.item.id; mudou = true; }
+    }
+
+    if(r.insumoId && !temInsumo.has(r.insumoId)){ r.insumoId = null; mudou = true; }
+    if(r.tipo === "insumo" && !r.insumoId && r.fala){
+      const m = acharNoTexto(normalizarFala(r.fala), S.insumos, termosDoInsumo, 0.72);
+      if(m){ r.insumoId = m.item.id; mudou = true; }
+    }
+
+    if(mudou){ await put("registros", r); reparados++; }
+  }
+  return reparados;
+}
+
 async function instalarVocabulario(){
   let novas = 0, novosIns = 0, completadas = 0;
 
@@ -689,7 +775,7 @@ async function instalarVocabulario(){
       continue;
     }
     /* id fixo: assim dois aparelhos criam a MESMA área e a sincronia não duplica */
-    const o = {id:"area-"+normalizarFala(v.nome).replace(/\s+/g,"-"), nome:v.nome, tipo:v.tipo,
+    const o = {id:idCanonico("area", v.nome), nome:v.nome, tipo:v.tipo,
                frequencia:null, cultura:"", apelidos:v.apelidos, obs:"", criadoEm:new Date().toISOString()};
     await put("areas", o); S.areas.push(o); novas++;
   }
@@ -704,7 +790,7 @@ async function instalarVocabulario(){
       if(ja.apelidos.length !== antes || !ja.unidade){ await put("insumos", ja); completadas++; }
       continue;
     }
-    const o = {id:"insumo-"+normalizarFala(v.nome).replace(/\s+/g,"-"), nome:v.nome, tipo:v.tipo,
+    const o = {id:idCanonico("insumo", v.nome), nome:v.nome, tipo:v.tipo,
                unidade:v.unidade, apelidos:v.apelidos, carencia:null, obs:"", criadoEm:new Date().toISOString()};
     await put("insumos", o); S.insumos.push(o); novosIns++;
   }
@@ -1723,9 +1809,13 @@ function screenMais(){
   const c3=el("div","card"); c3.style.marginTop="18px";
   c3.appendChild(item("&#128190;","Exportar backup","",exportar));
   c3.appendChild(item("&#128228;","Importar backup","",importar));
-  c3.appendChild(item("&#128260;","Juntar áreas repetidas","", async()=>{
-    const n = await juntarDuplicatas(); await load(); render();
-    toast(n ? "Juntei "+n+" repetida(s)" : "Nenhuma repetida");
+  c3.appendChild(item("&#128260;","Arrumar áreas e registros","", async()=>{
+    const j = await juntarDuplicatas();
+    const c = await canonizarIds();
+    await instalarVocabulario();
+    const o = await repararOrfaos();
+    await load(); render();
+    toast("Juntei "+j+", arrumei "+c+" e reconectei "+o+" registro(s)");
   }));
   c3.appendChild(item("&#128221;","Recarregar meu vocabulário","áreas e insumos", async()=>{
     const r = await instalarVocabulario(); render();
@@ -1853,8 +1943,12 @@ async function sincronizar(silencioso){
     const mudancas = [];
     for(const p of pend){
       if(p.apagado){ mudancas.push({id:p.oid, tipo:p.tipo, dados:null, apagado:true, atualizadoEm:p.atualizadoEm}); continue; }
-      const obj = (S[p.loja] || []).find(x => x.id === p.oid);
-      if(!obj) continue;
+      let obj = (S[p.loja] || []).find(x => x.id === p.oid);
+      if(!obj){
+        /* não está na memória: busca no banco antes de desistir, pra não sumir com a mudança */
+        obj = (await all(p.loja)).find(x => x.id === p.oid);
+        if(!obj) continue;
+      }
       const dados = Object.assign({}, obj);
       delete dados.foto;                         /* foto não viaja: fica no aparelho */
       mudancas.push({id:obj.id, tipo:p.tipo, dados, apagado:false, atualizadoEm:obj.atualizadoEm || p.atualizadoEm});
@@ -1965,6 +2059,13 @@ function screenSincronia(){
     const b1 = btn("Sincronizar agora","pri", () => sincronizar(false));
     b1.style.marginTop = "6px"; v.appendChild(b1);
 
+    const b4 = btn("Baixar tudo de novo","sec", async () => {
+      await saveCfg({syncEm: null});
+      await sincronizar(false);
+      screenSincronia();
+    });
+    b4.style.marginTop = "10px"; b4.style.flex = "1"; v.appendChild(b4);
+
     const b3 = btn("Enviar tudo deste aparelho","sec", async () => {
       const n = await marcarTudoPendente();
       toast("Pondo " + n + " item(ns) na fila…");
@@ -2064,7 +2165,9 @@ async function exemplos(){
     await open(); await load();
     if(S.config.vocab !== VOCAB_VERSAO){          /* instala uma vez, mesmo já tendo registros */
       await juntarDuplicatas();
+      await canonizarIds();
       await instalarVocabulario();
+      await repararOrfaos();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
@@ -2080,7 +2183,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
