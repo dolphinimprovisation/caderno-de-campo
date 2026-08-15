@@ -189,7 +189,7 @@ textarea{min-height:104px;resize:vertical}
 
 <nav>
   <button data-tab="home" class="on"><span class="ic">&#127793;</span>Início</button>
-  <button data-tab="pend"><span class="ic">&#127908;</span>Gravações</button>
+  <button data-tab="agenda"><span class="ic">&#128197;</span>Agenda</button>
   <button data-tab="diario"><span class="ic">&#128220;</span>Diário</button>
   <button data-tab="mais"><span class="ic">&#9776;</span>Mais</button>
 </nav>
@@ -233,8 +233,8 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=3;
-const STORES=["areas","insumos","plantios","registros","gravacoes","pendentes","config"];
+const DB_NAME="caderno-campo", DB_VER=4;
+const STORES=["areas","insumos","plantios","registros","regras","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -249,8 +249,8 @@ function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"r
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* o que viaja pra nuvem */
-const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", registros:"registro"};
-const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", registro:"registros"};
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", registros:"registro", regras:"regra"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", registro:"registros", regra:"regras"};
 
 async function marcarPendente(loja, id, apagado, quando){
   const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
@@ -278,10 +278,10 @@ function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly")
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], registros:[], gravacoes:[], pendentes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
 async function load(){
-  const [a,i,p,r,g,pe,c] = await Promise.all(STORES.map(all));
-  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.gravacoes=g; S.pendentes=pe;
+  const [a,i,p,r,rg,g,pe,c] = await Promise.all(STORES.map(all));
+  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.regras=rg; S.gravacoes=g; S.pendentes=pe;
   S.config = (c.find(x=>x.id==="app")||{id:"app"});
 }
 const areaById = id => S.areas.find(a=>a.id===id);
@@ -300,31 +300,29 @@ function statusGeral(){
   if(!S.registros.length && !S.gravacoes.length)
     return {nivel:"ok", t:"Comece falando", s:"Toque no microfone e diga o que você fez. Depois eu organizo."};
 
-  const comFreq = S.areas.filter(a=>a.frequencia>0);
-  if(!comFreq.length)
-    return {nivel:"ok", t:"Tudo tranquilo", s:"Pra eu avisar de atraso, diga de quantos em quantos dias cada área deve ser regada — em Mais › Áreas."};
+  const lista = (typeof tarefas === "function") ? tarefas() : [];
+  if(!lista.length)
+    return {nivel:"ok", t:"Tudo tranquilo", s:"Sem combinados ainda. Diga “a cada quantos dias” e eu passo a te cobrar."};
 
-  const atrasadas=[], nolimite=[], nunca=[];
-  comFreq.forEach(a=>{
-    const ui=ultimaIrrigacao(a.id);
-    if(!ui){ nunca.push(a); return; }
-    const d=daysAgo(ui)-a.frequencia;
-    if(d>0) atrasadas.push({a,d}); else if(d===0) nolimite.push(a);
-  });
+  const atrasadas = lista.filter(t => t.atraso > 0).sort((a,b) => b.atraso - a.atraso);
+  const hoje = lista.filter(t => t.atraso === 0);
 
   if(atrasadas.length){
-    atrasadas.sort((x,y)=>y.d-x.d);
-    const t = atrasadas.length===1 ? atrasadas[0].a.nome+" atrasada" : atrasadas.length+" áreas atrasadas";
-    const s = atrasadas.length===1
-      ? (atrasadas[0].d===1? "1 dia além do combinado." : atrasadas[0].d+" dias além do combinado.")
-      : atrasadas.map(x=>x.a.nome+" ("+x.d+"d)").join(" · ");
+    const t = atrasadas.length === 1
+      ? nomeDaRegra(atrasadas[0].reg) + " atrasado"
+      : atrasadas.length + " coisas atrasadas";
+    const s = atrasadas.length === 1
+      ? (atrasadas[0].atraso === 1 ? "1 dia além do combinado." : atrasadas[0].atraso + " dias além do combinado.")
+      : atrasadas.slice(0,3).map(x => nomeDaRegra(x.reg) + " (" + x.atraso + "d)").join(" · ");
     return {nivel:"atraso", t, s};
   }
-  if(nunca.length)
-    return {nivel:"atencao", t:"Falta registrar", s:(nunca.length===1?nunca[0].nome:nunca.length+" áreas")+" sem nenhuma irrigação registrada."};
-  if(nolimite.length)
-    return {nivel:"atencao", t:"Vence hoje", s:(nolimite.length===1?nolimite[0].nome:nolimite.length+" áreas")+" chegou no prazo de irrigar."};
-  return {nivel:"ok", t:"Tudo em dia", s:"Nenhuma área atrasada."};
+  if(hoje.length)
+    return {nivel:"atencao", t:"Vence hoje",
+            s: hoje.map(x => nomeDaRegra(x.reg)).join(" · ")};
+
+  const prox = lista[0];
+  return {nivel:"ok", t:"Tudo em dia",
+          s: prox ? "Próximo: " + nomeDaRegra(prox.reg) + " em " + (-prox.atraso) + " dia(s)." : "Nada atrasado."};
 }
 
 function plantaSVG(nivel){
@@ -837,7 +835,6 @@ function normalizarFala(t){
   x = x.replace(/(\d)[.,](\d)/g, "$1\u0001$2");      /* protege decimais: 0,5 e 0.5 */
   x = x.replace(/[^a-z0-9\s\u0001]/g, " ");
   x = x.replace(/\u0001/g, ".");
-  x = x.replace(/\b(\d+)\s+([ab])\b/g, "$1$2");     /* "piscina 2 a" -> "piscina 2a" */
   return x.replace(/\s+/g," ").trim();
 }
 
@@ -868,7 +865,13 @@ function termosDaArea(a){
     while(resto.length && /^(do|da|de|dos|das|o|a|os|as)$/.test(resto[0])) resto.shift();
     if(resto.length) lista.push(resto.join(" "));
   }
-  return [...new Set(lista.map(normalizarFala))].filter(x => x.length >= 3);
+  const formas = [];
+  lista.map(normalizarFala).forEach(t => {
+    formas.push(t);
+    const solto = t.replace(/(\d)([ab])\b/g, "$1 $2");   /* "piscina 2a" também vale como "piscina 2 a" */
+    if(solto !== t) formas.push(solto);
+  });
+  return [...new Set(formas)].filter(x => x.length >= 3);
 }
 const termosDoInsumo = i => [...new Set([i.nome].concat(i.apelidos||[]).map(normalizarFala))].filter(x => x.length >= 3);
 
@@ -985,6 +988,19 @@ function acharData(txt, hoje){
   return hoje;
 }
 
+/* "a cada 15 dias" -> 15 · "toda semana" -> 7 · "a cada 2 semanas" -> 14 · "todo mes" -> 30 */
+function diasDaFrequencia(txt){
+  const t = semAcento(txt);
+  let m = t.match(/a cada (\d+) (dias?|semanas?|mes)/);
+  if(m){ const n = +m[1]; return /semana/.test(m[2]) ? n*7 : /mes/.test(m[2]) ? n*30 : n; }
+  m = t.match(/de (\d+) em \d+ dias?/);
+  if(m) return +m[1];
+  if(/tod[oa]s? (os |as )?dias?/.test(t)) return 1;
+  if(/tod[oa]s? (os |as )?semanas?|toda semana/.test(t)) return 7;
+  if(/tod[oa]s? (os |as )?mes|todo mes/.test(t)) return 30;
+  return null;
+}
+
 function temAcao(frag){ return !!acharAcao(frag); }
 
 function fragmentar(txt){
@@ -1062,7 +1078,14 @@ function interpretar(falaOriginal, ctx){
     }
 
     const regra = frag.match(/\ba cada (\d+) (dias?|semanas?|mes(?:es)?)\b|\btod[oa]s? (?:os |as )?(dias?|semanas?|mes(?:es)?)\b|\bde (\d+) em \d+ dias?\b/);
-    if(regra) d.regraDetectada = regra[0];
+    if(regra){
+      d.regraDetectada = regra[0];
+      d.regraDias = diasDaFrequencia(regra[0]);
+    }
+    if(/\b(passa|passar|muda|mudar|mude|troca|trocar|altera|alterar)\b/.test(frag) && d.regraDias)
+      d.alterarRegra = true;
+    if(/\b(para|parar|pare|encerra|encerrar|cancela|cancelar|chega de|pode parar)\b/.test(frag) && !d.regraDias)
+      d.encerrarRegra = true;
 
     if(d.tipo === "observacao") d.obs = falaOriginal.trim();
     drafts.push(d);
@@ -1273,6 +1296,7 @@ function formArea(existing,then,sugestao){
              criadoEm:a.criadoEm||new Date().toISOString()};
     await put("areas",o);
     const ix=S.areas.findIndex(x=>x.id===o.id); if(ix>=0)S.areas[ix]=o; else S.areas.push(o);
+    await sincronizarRegraDeRega(o);
     closeSheet(); render(); toast(existing?"Área atualizada":"Área cadastrada"); if(then)then(o);
   })];
   if(existing) foot.unshift(btn("Excluir","dng",()=>confirmDel("Excluir \""+a.nome+"\"?","Os registros dela continuam no diário.",async()=>{
@@ -1306,17 +1330,108 @@ function formCadInsumo(existing,then,sugestao){
   openSheet(existing?"Editar insumo":"Novo insumo",w,foot);
 }
 
+
+/* ============ regras ============ */
+/* Uma regra é o que DEVE acontecer, de quanto em quanto tempo.
+   A próxima data não é guardada: é calculada a partir do último registro que casa
+   com a regra. Assim a baixa é automática — você registra a aplicação e a próxima
+   data anda sozinha, sem precisar marcar nada como feito. */
+
+const idRegra = (areaId, tipo, insumoId) => "regra-" + areaId + "-" + tipo + (insumoId ? "-" + insumoId : "");
+
+function regrasAtivas(){ return S.regras.filter(r => r.status !== "encerrada" && !r.pausadaAte); }
+
+function casaComRegra(reg, r){
+  return r.areaId === reg.areaId && r.tipo === reg.tipo &&
+         (!reg.insumoId || r.insumoId === reg.insumoId);
+}
+function ultimaExecucao(reg){
+  const datas = S.registros.filter(r => casaComRegra(reg, r)).map(r => r.data).sort();
+  return datas.length ? datas[datas.length - 1] : null;
+}
+function proximaDe(reg){
+  const base = ultimaExecucao(reg) || reg.desdeEm || (reg.criadoEm || "").slice(0, 10) || todayISO();
+  return new Date(dayStart(base) + reg.frequencia * MS_DAY).toISOString().slice(0, 10);
+}
+/* >0 atrasada, 0 vence hoje, <0 ainda falta */
+const atrasoDe = reg => daysAgo(proximaDe(reg));
+
+function nomeDaRegra(reg){
+  const a = areaById(reg.areaId);
+  const i = reg.insumoId ? insumoById(reg.insumoId) : null;
+  const oQue = i ? i.nome : TIPO_LB[reg.tipo];
+  return oQue + (a ? " · " + a.nome : "");
+}
+const cadaQuantos = f => f === 1 ? "todo dia"
+                      : f === 7 ? "toda semana"
+                      : f % 7 === 0 ? "a cada " + (f/7) + " semanas"
+                      : "a cada " + f + " dias";
+
+async function salvarRegra(reg){
+  reg.id = reg.id || idRegra(reg.areaId, reg.tipo, reg.insumoId);
+  reg.status = reg.status || "ativa";
+  reg.criadoEm = reg.criadoEm || new Date().toISOString();
+  reg.historico = reg.historico || [];
+  await put("regras", reg);
+  const ix = S.regras.findIndex(x => x.id === reg.id);
+  if(ix >= 0) S.regras[ix] = reg; else S.regras.push(reg);
+  return reg;
+}
+
+/* a frequência de rega que o Rob já tinha posto nas áreas vira regra de verdade */
+/* o campo de rega da área e o combinado de irrigação são a mesma coisa: mantém os dois juntos */
+async function sincronizarRegraDeRega(a){
+  const id = idRegra(a.id, "irrigacao");
+  const ja = S.regras.find(r => r.id === id);
+  if(a.frequencia > 0){
+    if(ja && ja.frequencia === a.frequencia && ja.status === "ativa") return;
+    const hist = (ja && ja.frequencia && ja.frequencia !== a.frequencia)
+      ? (ja.historico || []).concat([{em: todayISO(), de: ja.frequencia, para: a.frequencia}])
+      : (ja ? ja.historico : []);
+    await salvarRegra(Object.assign({}, ja || {}, {
+      id, areaId:a.id, tipo:"irrigacao", frequencia:a.frequencia,
+      status:"ativa", desdeEm:(ja && ja.desdeEm) || todayISO(), historico: hist || []
+    }));
+  } else if(ja && ja.status !== "encerrada"){
+    await salvarRegra(Object.assign({}, ja, {status:"encerrada"}));
+  }
+}
+
+async function migrarFrequencias(){
+  let n = 0;
+  for(const a of S.areas){
+    if(!(a.frequencia > 0)) continue;
+    const id = idRegra(a.id, "irrigacao");
+    if(S.regras.some(r => r.id === id)) continue;
+    await salvarRegra({id, areaId:a.id, tipo:"irrigacao", frequencia:a.frequencia,
+                       desdeEm: todayISO(), origem:"frequencia da área"});
+    n++;
+  }
+  return n;
+}
+
+function tarefas(){
+  return regrasAtivas().map(reg => ({reg, quando: proximaDe(reg), atraso: atrasoDe(reg)}))
+                       .sort((x,y) => x.quando.localeCompare(y.quando));
+}
+
 /* ============ tela de confirmação ============ */
 function telaConfirmar(texto, drafts, g){
   const w = el("div");
   const eb = errBox(); w.appendChild(eb);
   w.appendChild(el("div","fala-orig", "“" + esc(texto) + "”"));
 
-  const regra = drafts.find(d => d.regraDetectada);
-  if(regra){
-    const a = el("div","aviso");
-    a.innerHTML = "Você falou <b>“" + esc(regra.regraDetectada) + "”</b>. Regras automáticas ainda não existem — por enquanto isso fica guardado na observação.";
-    w.appendChild(a);
+  /* o combinado falado ("a cada 15 dias") vira uma regra de verdade, mostrada à parte */
+  const comRegra = drafts.find(d => d.regraDias > 0);
+  let regraPrevia = null;
+  if(comRegra && comRegra.areaId){
+    const tipoR = comRegra.tipo === "observacao" ? "irrigacao" : comRegra.tipo;
+    const jaExiste = S.regras.find(r => r.id === idRegra(comRegra.areaId, tipoR, comRegra.insumoId) && r.status !== "encerrada");
+    regraPrevia = {
+      areaId: comRegra.areaId, tipo: tipoR, insumoId: comRegra.insumoId || null,
+      frequencia: comRegra.regraDias, anterior: jaExiste ? jaExiste.frequencia : null,
+      id: idRegra(comRegra.areaId, tipoR, comRegra.insumoId)
+    };
   }
 
   const lista = el("div"); w.appendChild(lista);
@@ -1429,6 +1544,29 @@ function telaConfirmar(texto, drafts, g){
   }
   desenhar();
 
+  if(regraPrevia){
+    const c = el("div","card"); c.style.cssText = "margin-bottom:12px;border-left:5px solid var(--green)";
+    const bd = el("div"); bd.style.padding = "14px 16px";
+    const a = areaById(regraPrevia.areaId);
+    const i = regraPrevia.insumoId ? insumoById(regraPrevia.insumoId) : null;
+    const oQue = i ? i.nome : TIPO_LB[regraPrevia.tipo];
+    bd.appendChild(el("div","t1", (regraPrevia.anterior ? "Mudar o combinado" : "Novo combinado")));
+    bd.appendChild(el("div","t2", esc(oQue + " · " + (a ? a.nome : "") + " · " + cadaQuantos(regraPrevia.frequencia))));
+    if(regraPrevia.anterior)
+      bd.appendChild(el("div","t2 falta", "era " + cadaQuantos(regraPrevia.anterior)));
+    const prev = {areaId:regraPrevia.areaId, tipo:regraPrevia.tipo, insumoId:regraPrevia.insumoId,
+                  frequencia:regraPrevia.frequencia, desdeEm:todayISO(), criadoEm:new Date().toISOString()};
+    bd.appendChild(el("div","t2", "a partir de agora, próxima em " + fmtDay(proximaDe(prev))));
+    c.appendChild(bd);
+
+    const acts = el("div","grav-acts"); acts.style.padding = "0 14px 14px";
+    const nao = el("button","mini d"); nao.textContent = "Não criar";
+    nao.onclick = () => { regraPrevia = null; telaConfirmar(texto, drafts, g); };
+    acts.appendChild(nao);
+    c.appendChild(acts);
+    lista.appendChild(c);
+  }
+
   const cobrar = (ix, msg) => {
     showErr(eb, msg);
     const c = cartoes[ix];
@@ -1453,6 +1591,7 @@ function telaConfirmar(texto, drafts, g){
       Object.keys(r).forEach(k => { if(k[0] === "_") delete r[k]; });
       delete r.areaSugerida; delete r.insumoSugerido; delete r.areaConfianca;
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
+      delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
       if(r.tipo === "plantio"){
         const p = {id:uid(), areaId:r.areaId, cultura:r.cultura, variedade:r.variedade||"",
@@ -1463,8 +1602,21 @@ function telaConfirmar(texto, drafts, g){
       await put("registros", r); S.registros.push(r);
       if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo || S.config.ultimoMetodo});
     }
+    if(regraPrevia){
+      const antiga = S.regras.find(r => r.id === regraPrevia.id);
+      const reg = antiga || {};
+      const hist = (reg.historico || []).slice();
+      if(antiga && antiga.frequencia !== regraPrevia.frequencia)
+        hist.push({em: todayISO(), de: antiga.frequencia, para: regraPrevia.frequencia});
+      await salvarRegra(Object.assign({}, reg, {
+        id: regraPrevia.id, areaId: regraPrevia.areaId, tipo: regraPrevia.tipo,
+        insumoId: regraPrevia.insumoId, frequencia: regraPrevia.frequencia,
+        status: "ativa", pausadaAte: null,
+        desdeEm: reg.desdeEm || todayISO(), historico: hist
+      }));
+    }
     closeSheet(); render();
-    toast(drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos");
+    toast(regraPrevia ? "Salvo, e agora eu te cobro" : (drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos"));
   };
 
   const descartar = () => confirmDel("Descartar o que você falou?", g ? "O áudio continua guardado em Gravações, mas nada entra no diário." : "Nada será salvo no diário.", async () => {
@@ -1484,9 +1636,11 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
 });
 function head(t,s){ $("#hdTitle").childNodes[0].nodeValue=t; $("#hdSub").textContent=s||""; }
 function navBadge(){
-  const b=document.querySelector('nav button[data-tab=pend]');
+  const b=document.querySelector('nav button[data-tab=agenda]');
+  if(!b) return;
   const old=b.querySelector(".badge"); if(old) old.remove();
-  const n=pendentes().length; if(n) b.appendChild(el("span","badge",String(n)));
+  const n=tarefas().filter(t => t.atraso >= 0).length;
+  if(n) b.appendChild(el("span","badge",String(n)));
 }
 
 function render(){
@@ -1495,6 +1649,7 @@ function render(){
   navBadge();
   if(stack && stack.tipo==="area") return screenAreaDetalhe(stack.id);
   if(tab==="home") return screenHome();
+  if(tab==="agenda") return screenAgenda();
   if(tab==="pend") return screenPendentes();
   if(tab==="diario") return screenDiario();
   if(tab==="mais") return screenMais();
@@ -1754,8 +1909,7 @@ function screenAreaDetalhe(id){
     kv("Combinado","a cada "+a.frequencia+" dias");
     kv("Situação", atraso==null?"sem registro": atraso>0?("atrasada "+atraso+(atraso===1?" dia":" dias")): atraso===0?"vence hoje":"em dia");
   }
-  const ps=plantiosAtivos(a.id);
-  kv("Plantio ativo", ps.length? ps.map(p=>p.cultura+" ("+daysAgo(p.dataPlantio)+" dias)").join(", "):"nenhum");
+
   const rs=S.registros.filter(r=>r.areaId===a.id);
   kv("Registros",rs.length);
   if(a.apelidos&&a.apelidos.length) kv("Apelidos",a.apelidos.join(", "));
@@ -1782,6 +1936,134 @@ function screenAreaDetalhe(id){
   const eb=btn("Editar área","sec",()=>formArea(a)); eb.style.flex="1"; v.appendChild(eb);
 }
 
+
+/* ============ agenda e regras ============ */
+function screenAgenda(){
+  head("Agenda","");
+  const v = $("#view");
+  const lista = tarefas();
+
+  if(!lista.length){
+    const e = el("div","empty"); e.style.textAlign = "left";
+    e.innerHTML = "<b>Nenhum combinado ainda.</b><br><br>Fale, por exemplo: <i>“apliquei neem na estufa 1 a cada 7 dias”</i>. " +
+      "A partir daí eu passo a te cobrar, e a data anda sozinha toda vez que você registrar a aplicação.";
+    v.appendChild(e);
+    return;
+  }
+
+  const bloco = (titulo, itens, cor) => {
+    if(!itens.length) return;
+    const sec = el("div","sec");
+    sec.appendChild(el("div","sec-t", titulo));
+    const c = el("div","card");
+    itens.forEach(({reg, quando, atraso}) => {
+      const b = el("button","acard");
+      const bd = el("div","bd");
+      bd.appendChild(el("div","nm", esc(nomeDaRegra(reg))));
+      const u = ultimaExecucao(reg);
+      bd.appendChild(el("div","mt", esc(cadaQuantos(reg.frequencia) + (u ? " · última vez " + fmtAgo(u) : " · nunca feito"))));
+      b.appendChild(bd);
+      const txt = atraso > 0 ? "atrasado " + atraso + "d" : atraso === 0 ? "hoje" : "em " + (-atraso) + "d";
+      b.appendChild(el("div","pill " + (atraso > 0 ? "bad" : atraso === 0 ? "warn" : "ok"), txt));
+      b.onclick = () => verRegra(reg);
+      c.appendChild(b);
+    });
+    sec.appendChild(c);
+    v.appendChild(sec);
+  };
+
+  bloco("Atrasado", lista.filter(t => t.atraso > 0));
+  bloco("Vence hoje", lista.filter(t => t.atraso === 0));
+  bloco("Vem por aí", lista.filter(t => t.atraso < 0));
+
+  const nota = el("div","empty");
+  nota.style.cssText = "margin-top:6px;text-align:left;font-size:14px";
+  nota.innerHTML = "A data anda sozinha: registre a aplicação e o combinado se resolve. " +
+    "O aviso no celular ainda não existe — por enquanto você vê aqui e na plantinha da tela inicial.";
+  v.appendChild(nota);
+}
+
+function verRegra(reg){
+  const w = el("div");
+  const c = el("div","card"); c.style.padding = "4px 16px";
+  const kv = (k, val) => { if(val == null || val === "") return; const d = el("div","kv");
+    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
+  const u = ultimaExecucao(reg);
+  kv("O quê", nomeDaRegra(reg));
+  kv("Combinado", cadaQuantos(reg.frequencia));
+  kv("Última vez", u ? fmtDay(u) : "nunca");
+  kv("Próxima", fmtDay(proximaDe(reg)));
+  const at = atrasoDe(reg);
+  kv("Situação", at > 0 ? "atrasado " + at + " dia(s)" : at === 0 ? "vence hoje" : "em dia");
+  if(reg.pausadaAte) kv("Pausado até", fmtDay(reg.pausadaAte));
+  w.appendChild(c);
+
+  if((reg.historico || []).length){
+    const h = el("div","sec"); h.style.marginTop = "16px";
+    h.appendChild(el("div","sec-t","Como mudou"));
+    const hc = el("div","card");
+    reg.historico.slice().reverse().forEach(x => {
+      const r = el("div","row");
+      const bd = el("div","bd");
+      bd.appendChild(el("div","t1", cadaQuantos(x.de) + " → " + cadaQuantos(x.para)));
+      bd.appendChild(el("div","t2", fmtDay(x.em)));
+      r.appendChild(bd); hc.appendChild(r);
+    });
+    h.appendChild(hc); w.appendChild(h);
+  }
+
+  const foot = [btn("Fechar","sec",closeSheet)];
+  foot.push(btn("Mudar o prazo","pri", () => {
+    const ww = el("div");
+    const f = input("number", reg.frequencia, "dias");
+    ww.appendChild(field("A cada quantos dias?", f));
+    openSheet("Mudar o combinado", ww, [btn("Cancelar","sec",()=>verRegra(reg)), btn("Salvar","pri", async () => {
+      const n = num(f.value);
+      if(!(n > 0)) return toast("Diga um número de dias.");
+      const hist = (reg.historico || []).concat([{em: todayISO(), de: reg.frequencia, para: n}]);
+      await salvarRegra(Object.assign({}, reg, {frequencia:n, historico:hist}));
+      closeSheet(); render(); toast("Combinado mudado pra " + cadaQuantos(n));
+    })]);
+  }));
+  if(reg.status !== "encerrada")
+    foot.push(btn("Encerrar","dng", () => confirmDel("Encerrar este combinado?",
+      "Ele para de te cobrar. O histórico fica guardado.", async () => {
+        await salvarRegra(Object.assign({}, reg, {status:"encerrada"}));
+        closeSheet(); render(); toast("Combinado encerrado");
+      })));
+  openSheet(nomeDaRegra(reg), w, foot);
+}
+
+function screenRegras(){
+  head("Combinados",""); tab="mais"; stack=null;
+  const v = $("#view"); v.innerHTML = "";
+  const ativas = S.regras.filter(r => r.status !== "encerrada");
+  const fim = S.regras.filter(r => r.status === "encerrada");
+  const bloco = (titulo, arr) => {
+    if(!arr.length) return;
+    const s2 = el("div","sec"); s2.appendChild(el("div","sec-t", titulo));
+    const c = el("div","card");
+    arr.forEach(reg => {
+      const b = el("button","acard");
+      const bd = el("div","bd");
+      bd.appendChild(el("div","nm", esc(nomeDaRegra(reg))));
+      bd.appendChild(el("div","mt", esc(cadaQuantos(reg.frequencia))));
+      b.appendChild(bd);
+      if(reg.status !== "encerrada"){
+        const at = atrasoDe(reg);
+        b.appendChild(el("div","pill " + (at > 0 ? "bad" : at === 0 ? "warn" : "ok"),
+          at > 0 ? "atrasado" : at === 0 ? "hoje" : "em dia"));
+      }
+      b.onclick = () => verRegra(reg);
+      c.appendChild(b);
+    });
+    s2.appendChild(c); v.appendChild(s2);
+  };
+  if(!S.regras.length) v.appendChild(el("div","empty","Nenhum combinado ainda."));
+  bloco("Ativos", ativas); bloco("Encerrados", fim);
+  const vt = btn("← Voltar","sec", () => go("mais")); vt.style.marginTop = "14px"; vt.style.flex = "1"; v.appendChild(vt);
+}
+
 /* ============ MAIS ============ */
 function screenMais(){
   head("Mais","");
@@ -1791,6 +2073,7 @@ function screenMais(){
     b.appendChild(el("span","ch",esc(ch||""))); b.onclick=fn; return b; };
 
   const c=el("div","card");
+  c.appendChild(item("&#128197;","Combinados",S.regras.filter(r=>r.status!=="encerrada").length+"",screenRegras));
   c.appendChild(item("&#127795;","Áreas",S.areas.length+"",screenAreas));
   c.appendChild(item("&#129524;","Insumos",S.insumos.length+"",screenInsumos));
   c.appendChild(item("&#127793;","Plantios",S.plantios.filter(p=>p.status!=="encerrado").length+" ativos",screenPlantios));
@@ -1798,6 +2081,7 @@ function screenMais(){
 
   const c2=el("div","card"); c2.style.marginTop="18px";
   c2.appendChild(item("&#9997;","Registrar sem falar","",()=>escolherTipo({})));
+  c2.appendChild(item("&#127908;","Gravações não entendidas",pendentes().length+"",()=>{ tab="pend"; stack=null; render(); }));
   v.appendChild(c2);
 
   const cS=el("div","card"); cS.style.marginTop="18px";
@@ -2168,6 +2452,7 @@ async function exemplos(){
       await canonizarIds();
       await instalarVocabulario();
       await repararOrfaos();
+      await migrarFrequencias();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
@@ -2183,7 +2468,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,diasDaFrequencia,normalizarFala,fragmentar};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
