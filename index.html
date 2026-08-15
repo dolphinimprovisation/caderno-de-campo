@@ -917,6 +917,34 @@ function melhorJanela(txt, termos){
   return melhor;
 }
 
+/* "estufa 1 e 2", "estufa 1, 2 e 3" — devolve todas as áreas citadas.
+   O casamento normal acha uma só; aqui procuramos as irmãs que ficaram de fora. */
+function areasDaFrase(frag, areas){
+  const achadas = [];
+  const juntar = a => { if(a && !achadas.some(x => x.id === a.id)) achadas.push(a); };
+
+  const principal = acharNoTexto(frag, areas, termosDaArea, 0.72);
+  if(!principal) return achadas;
+  juntar(principal.item);
+
+  const base = principal.termo.replace(/\s*\d+[ab]?\s*$/, "").trim();   /* "estufa 1" -> "estufa" */
+  if(base.length < 3) return achadas;
+
+  const pos = frag.indexOf(principal.termo);
+  const depois = pos >= 0 ? frag.slice(pos + principal.termo.length) : "";
+  const corte = depois.search(/\b(a cada|de \d+ em|tod[oa]s?|por|durante|com|e cada)\b/);
+  const trecho = corte >= 0 ? depois.slice(0, corte) : depois;
+  (trecho.match(/\b(\d+[ab]?)\b/g) || []).forEach(n => {
+    const m = acharNoTexto(base + " " + n, areas, termosDaArea, 0.8);
+    if(m) juntar(m.item);
+  });
+
+  if(/\btodas?\b/.test(frag))
+    areas.filter(a => normalizarFala(a.nome).startsWith(base)).forEach(juntar);
+
+  return achadas;
+}
+
 const ACOES = [
   {p:"reguei", tipo:"irrigacao", ouvidos:["cheguei","peguei","seguei","leguei","reguei a","regue","rega","regar","reguem","reguei o"]},
   {p:"regei",  tipo:"irrigacao", ouvidos:[]},
@@ -1047,6 +1075,7 @@ function interpretar(falaOriginal, ctx){
     const ar = acharNoTexto(frag, areas, termosDaArea, 0.72);
     if(ar){ d.areaId = ar.item.id; areaHerdada = ar.item.id; d.areaConfianca = ar.s; }
     else if(areaHerdada && d.tipo !== "observacao") d.areaId = areaHerdada;
+    d.areasCitadas = ar ? areasDaFrase(frag, areas).map(a => a.id) : [];
 
     const n = x => parseFloat(String(x).replace(",","."));
     const min = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:minutos?|min\b)/);
@@ -1082,6 +1111,10 @@ function interpretar(falaOriginal, ctx){
       d.regraDetectada = regra[0];
       d.regraDias = diasDaFrequencia(regra[0]);
     }
+    /* sem verbo de ação, mas com frequência: é combinado, não registro.
+       "neem na estufa 1 a cada 7 dias" não quer dizer que ele aplicou agora. */
+    if(!acao && d.regraDias > 0) d.soCombinado = true;
+
     if(/\b(passa|passar|muda|mudar|mude|troca|trocar|altera|alterar)\b/.test(frag) && d.regraDias)
       d.alterarRegra = true;
     if(/\b(para|parar|pare|encerra|encerrar|cancela|cancelar|chega de|pode parar)\b/.test(frag) && !d.regraDias)
@@ -1416,27 +1449,33 @@ function tarefas(){
 }
 
 /* ============ tela de confirmação ============ */
-function telaConfirmar(texto, drafts, g){
+function telaConfirmar(texto, drafts, g, previasFixas){
   const w = el("div");
   const eb = errBox(); w.appendChild(eb);
   w.appendChild(el("div","fala-orig", "“" + esc(texto) + "”"));
 
-  /* o combinado falado ("a cada 15 dias") vira uma regra de verdade, mostrada à parte */
+  /* o combinado falado vira regra de verdade, mostrada à parte.
+     Se ele falou SÓ o combinado (sem verbo de ação), nenhum registro é criado. */
   const comRegra = drafts.find(d => d.regraDias > 0);
-  let regraPrevia = null;
-  if(comRegra && comRegra.areaId){
+  const soCombinado = !!(comRegra && comRegra.soCombinado);
+  let previas = [];
+  if(comRegra){
     const tipoR = comRegra.tipo === "observacao" ? "irrigacao" : comRegra.tipo;
-    const jaExiste = S.regras.find(r => r.id === idRegra(comRegra.areaId, tipoR, comRegra.insumoId) && r.status !== "encerrada");
-    regraPrevia = {
-      areaId: comRegra.areaId, tipo: tipoR, insumoId: comRegra.insumoId || null,
-      frequencia: comRegra.regraDias, anterior: jaExiste ? jaExiste.frequencia : null,
-      id: idRegra(comRegra.areaId, tipoR, comRegra.insumoId)
-    };
+    const alvos = (comRegra.areasCitadas && comRegra.areasCitadas.length)
+      ? comRegra.areasCitadas : (comRegra.areaId ? [comRegra.areaId] : []);
+    previas = alvos.map(areaId => {
+      const id = idRegra(areaId, tipoR, comRegra.insumoId);
+      const ja = S.regras.find(r => r.id === id && r.status !== "encerrada");
+      return {id, areaId, tipo:tipoR, insumoId: comRegra.insumoId || null,
+              frequencia: comRegra.regraDias, anterior: ja ? ja.frequencia : null};
+    });
   }
+  if(soCombinado) drafts = [];
+  if(previasFixas) previas = previasFixas;
 
   const lista = el("div"); w.appendChild(lista);
 
-  const voltar = () => telaConfirmar(texto, drafts, g);
+  const voltar = () => telaConfirmar(texto, drafts, g, previas);
 
   function editar(ix){
     const d = drafts[ix];
@@ -1544,28 +1583,25 @@ function telaConfirmar(texto, drafts, g){
   }
   desenhar();
 
-  if(regraPrevia){
+  previas.forEach(prev => {
     const c = el("div","card"); c.style.cssText = "margin-bottom:12px;border-left:5px solid var(--green)";
     const bd = el("div"); bd.style.padding = "14px 16px";
-    const a = areaById(regraPrevia.areaId);
-    const i = regraPrevia.insumoId ? insumoById(regraPrevia.insumoId) : null;
-    const oQue = i ? i.nome : TIPO_LB[regraPrevia.tipo];
-    bd.appendChild(el("div","t1", (regraPrevia.anterior ? "Mudar o combinado" : "Novo combinado")));
-    bd.appendChild(el("div","t2", esc(oQue + " · " + (a ? a.nome : "") + " · " + cadaQuantos(regraPrevia.frequencia))));
-    if(regraPrevia.anterior)
-      bd.appendChild(el("div","t2 falta", "era " + cadaQuantos(regraPrevia.anterior)));
-    const prev = {areaId:regraPrevia.areaId, tipo:regraPrevia.tipo, insumoId:regraPrevia.insumoId,
-                  frequencia:regraPrevia.frequencia, desdeEm:todayISO(), criadoEm:new Date().toISOString()};
-    bd.appendChild(el("div","t2", "a partir de agora, próxima em " + fmtDay(proximaDe(prev))));
+    const a = areaById(prev.areaId);
+    const i = prev.insumoId ? insumoById(prev.insumoId) : null;
+    const oQue = i ? i.nome : TIPO_LB[prev.tipo];
+    bd.appendChild(el("div","t1", prev.anterior ? "Mudar o combinado" : "Novo combinado"));
+    bd.appendChild(el("div","t2", esc(oQue + " · " + (a ? a.nome : "") + " · " + cadaQuantos(prev.frequencia))));
+    if(prev.anterior) bd.appendChild(el("div","t2 falta", "era " + cadaQuantos(prev.anterior)));
+    const finge = {areaId:prev.areaId, tipo:prev.tipo, insumoId:prev.insumoId,
+                   frequencia:prev.frequencia, desdeEm:todayISO(), criadoEm:new Date().toISOString()};
+    bd.appendChild(el("div","t2", "próxima em " + fmtDay(proximaDe(finge))));
     c.appendChild(bd);
-
     const acts = el("div","grav-acts"); acts.style.padding = "0 14px 14px";
     const nao = el("button","mini d"); nao.textContent = "Não criar";
-    nao.onclick = () => { regraPrevia = null; telaConfirmar(texto, drafts, g); };
-    acts.appendChild(nao);
-    c.appendChild(acts);
+    nao.onclick = () => { previas = previas.filter(x => x.id !== prev.id); telaConfirmar(texto, drafts, g, previas); };
+    acts.appendChild(nao); c.appendChild(acts);
     lista.appendChild(c);
-  }
+  });
 
   const cobrar = (ix, msg) => {
     showErr(eb, msg);
@@ -1574,6 +1610,9 @@ function telaConfirmar(texto, drafts, g){
   };
 
   const salvar = async () => {
+    if(!drafts.length && !previas.length) return showErr(eb, "Não sobrou nada pra salvar.");
+    for(const prev of previas)
+      if(!prev.areaId) return showErr(eb, "Falta a área do combinado.");
     for(let ix = 0; ix < drafts.length; ix++){
       const d = drafts[ix];
       if(d.tipo !== "observacao" && !d.areaId) return cobrar(ix, "Falta a área — toque num dos botões laranjas.");
@@ -1602,28 +1641,30 @@ function telaConfirmar(texto, drafts, g){
       await put("registros", r); S.registros.push(r);
       if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo || S.config.ultimoMetodo});
     }
-    if(regraPrevia){
-      const antiga = S.regras.find(r => r.id === regraPrevia.id);
+    for(const prev of previas){
+      const antiga = S.regras.find(r => r.id === prev.id);
       const reg = antiga || {};
       const hist = (reg.historico || []).slice();
-      if(antiga && antiga.frequencia !== regraPrevia.frequencia)
-        hist.push({em: todayISO(), de: antiga.frequencia, para: regraPrevia.frequencia});
+      if(antiga && antiga.frequencia !== prev.frequencia)
+        hist.push({em: todayISO(), de: antiga.frequencia, para: prev.frequencia});
       await salvarRegra(Object.assign({}, reg, {
-        id: regraPrevia.id, areaId: regraPrevia.areaId, tipo: regraPrevia.tipo,
-        insumoId: regraPrevia.insumoId, frequencia: regraPrevia.frequencia,
-        status: "ativa", pausadaAte: null,
+        id: prev.id, areaId: prev.areaId, tipo: prev.tipo, insumoId: prev.insumoId,
+        frequencia: prev.frequencia, status: "ativa", pausadaAte: null,
         desdeEm: reg.desdeEm || todayISO(), historico: hist
       }));
     }
     closeSheet(); render();
-    toast(regraPrevia ? "Salvo, e agora eu te cobro" : (drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos"));
+    toast(previas.length
+      ? (drafts.length ? "Salvo, e agora eu te cobro" : (previas.length === 1 ? "Combinado criado" : previas.length + " combinados criados"))
+      : (drafts.length === 1 ? "Registrado" : drafts.length + " registros salvos"));
   };
 
   const descartar = () => confirmDel("Descartar o que você falou?", g ? "O áudio continua guardado em Gravações, mas nada entra no diário." : "Nada será salvo no diário.", async () => {
     closeSheet(); render(); toast("Descartado");
   });
 
-  openSheet("Confira o que entendi", w, [btn("Descartar tudo","sec",descartar), btn("Salvar","pri",salvar)]);
+  openSheet(soCombinado ? "Confira o combinado" : "Confira o que entendi", w,
+    [btn("Descartar tudo","sec",descartar), btn("Salvar","pri",salvar)]);
 }
 
 /* ============ navegacao ============ */
