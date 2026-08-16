@@ -584,7 +584,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const VOCAB_VERSAO = 3;
+const VOCAB_VERSAO = 4;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -1982,6 +1982,13 @@ function screenAreaDetalhe(id){
 function screenAgenda(){
   head("Agenda","");
   const v = $("#view");
+
+  /* rede de segurança: se alguma área tem rega marcada e não virou combinado, arruma na hora */
+  const faltando = S.areas.filter(a => a.frequencia > 0 && !S.regras.some(r => r.id === idRegra(a.id, "irrigacao")));
+  if(faltando.length){
+    migrarFrequencias().then(n => { if(n) render(); });
+  }
+
   const lista = tarefas();
 
   if(!lista.length){
