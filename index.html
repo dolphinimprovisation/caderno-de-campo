@@ -26,6 +26,12 @@ body{
 h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 input,select,textarea{font:inherit;color:inherit;width:100%}
+.mds{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:5px}
+.mds b{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--ink2)}
+.mds i{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.s-bem{background:#48A55C}.s-atencao{background:#D89A16}.s-problema{background:#C4452F}
+.acard.off .nm,.acard.off .mt{opacity:.5}
+.d-muda{background:#5B4B8A}
 .hide{display:none !important}
 
 header{
@@ -233,8 +239,8 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=4;
-const STORES=["areas","insumos","plantios","registros","regras","gravacoes","pendentes","config"];
+const DB_NAME="caderno-campo", DB_VER=6;
+const STORES=["areas","insumos","plantios","mudas","acoes","registros","regras","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -249,8 +255,8 @@ function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"r
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* o que viaja pra nuvem */
-const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", registros:"registro", regras:"regra"};
-const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", registro:"registros", regra:"regras"};
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", registros:"registro", regras:"regra"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", registro:"registros", regra:"regras"};
 
 async function marcarPendente(loja, id, apagado, quando){
   const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
@@ -278,11 +284,14 @@ function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly")
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
+/* por nome, não por posição: acrescentar uma loja não pode embaralhar o estado */
 async function load(){
-  const [a,i,p,r,rg,g,pe,c] = await Promise.all(STORES.map(all));
-  S.areas=a; S.insumos=i; S.plantios=p; S.registros=r; S.regras=rg; S.gravacoes=g; S.pendentes=pe;
-  S.config = (c.find(x=>x.id==="app")||{id:"app"});
+  const res = await Promise.all(STORES.map(all));
+  const por = {}; STORES.forEach((s,i) => por[s] = res[i] || []);
+  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes;
+  S.registros=por.registros; S.regras=por.regras; S.gravacoes=por.gravacoes; S.pendentes=por.pendentes;
+  S.config = (por.config.find(x=>x.id==="app")||{id:"app"});
 }
 const areaById = id => S.areas.find(a=>a.id===id);
 const insumoById = id => S.insumos.find(x=>x.id===id);
@@ -293,19 +302,59 @@ function ultimaIrrigacao(areaId){
   const rs=S.registros.filter(r=>r.tipo==="irrigacao"&&r.areaId===areaId).sort((a,b)=>b.data.localeCompare(a.data));
   return rs.length? rs[0].data : null;
 }
-function plantiosAtivos(areaId){ return S.plantios.filter(p=>p.areaId===areaId && p.status!=="encerrado"); }
+/* ---- mudas ----
+   Uma muda é uma planta individual dentro de uma linha. Repetidas ganham número:
+   jaca 1, jaca 2, jaca 3. O número é o que faz a fala nunca ficar ambígua. */
+const SAUDES = ["bem","atencao","problema"];
+const SAUDE_LB = {bem:"bem", atencao:"atenção", problema:"problema"};
+const nomeMuda = m => m ? m.especie + " " + (m.numero || 1) : "";
+const mudaById = id => S.mudas.find(m => m.id === id);
+const mudasDaArea = areaId => S.mudas.filter(m => m.areaId === areaId)
+  .sort((a,b) => a.especie.localeCompare(b.especie) || (a.numero||1) - (b.numero||1));
+const idMuda = (areaId, especie, numero) =>
+  "muda-" + String(areaId).replace(/^area-/,"") + "-" + normalizarFala(especie).replace(/\s+/g,"-") + "-" + (numero || 1);
+function proximoNumero(areaId, especie){
+  const e = normalizarFala(especie);
+  const ns = S.mudas.filter(m => m.areaId === areaId && normalizarFala(m.especie) === e).map(m => m.numero || 1);
+  return ns.length ? Math.max.apply(null, ns) + 1 : 1;
+}
+const singular = s => /s$/.test(s) && s.length >= 5 ? s.slice(0,-1) : s;
+const capitalizar = s => String(s||"").replace(/^\w/, c => c.toUpperCase());
+
+/* ---- situação da área ---- */
+const areaParada = id => { const a = areaById(id); return !!(a && a.situacao === "parada"); };
+function mudasPorSaude(){
+  const viva = m => !areaParada(m.areaId);
+  return {ruins: S.mudas.filter(m => m.saude === "problema" && viva(m)),
+          amarelas: S.mudas.filter(m => m.saude === "atencao" && viva(m))};
+}
+/* a pior situação entre as mudas da linha */
+function saudeDaArea(areaId){
+  const ms = mudasDaArea(areaId);
+  if(ms.some(m => m.saude === "problema")) return "problema";
+  if(ms.some(m => m.saude === "atencao")) return "atencao";
+  return ms.length ? "bem" : null;
+}
 
 /* ============ status geral (a plantinha) ============ */
 function statusGeral(){
-  if(!S.registros.length && !S.gravacoes.length)
+  const {ruins, amarelas} = mudasPorSaude();
+  const ondeM = m => nomeMuda(m) + ((areaById(m.areaId)) ? " · " + areaById(m.areaId).nome : "");
+
+  if(!S.registros.length && !S.gravacoes.length && !ruins.length && !amarelas.length)
     return {nivel:"ok", t:"Comece falando", s:"Toque no microfone e diga o que você fez. Depois eu organizo."};
 
   const lista = (typeof tarefas === "function") ? tarefas() : [];
-  if(!lista.length)
-    return {nivel:"ok", t:"Tudo tranquilo", s:"Sem combinados ainda. Diga “a cada quantos dias” e eu passo a te cobrar."};
 
   const atrasadas = lista.filter(t => t.atraso > 0).sort((a,b) => b.atraso - a.atraso);
   const hoje = lista.filter(t => t.atraso === 0);
+
+  /* muda doente pesa como atraso; muda pedindo atenção pesa como “vence hoje” */
+  const blocoMudas = (arr, palavra, nivel) => ({
+    nivel,
+    t: arr.length === 1 ? ondeM(arr[0]) + palavra : arr.length + " mudas" + palavra,
+    s: arr.slice(0,3).map(ondeM).join(" · ")
+  });
 
   if(atrasadas.length){
     const t = atrasadas.length === 1
@@ -316,9 +365,16 @@ function statusGeral(){
       : atrasadas.slice(0,3).map(x => nomeDaRegra(x.reg) + " (" + x.atraso + "d)").join(" · ");
     return {nivel:"atraso", t, s};
   }
+  if(ruins.length) return blocoMudas(ruins, " com problema", "atraso");
+
   if(hoje.length)
     return {nivel:"atencao", t:"Vence hoje",
             s: hoje.map(x => nomeDaRegra(x.reg)).join(" · ")};
+
+  if(amarelas.length) return blocoMudas(amarelas, " pedindo atenção", "atencao");
+
+  if(!lista.length)
+    return {nivel:"ok", t:"Tudo tranquilo", s:"Sem combinados ainda. Diga “a cada quantos dias” e eu passo a te cobrar."};
 
   const prox = lista[0];
   return {nivel:"ok", t:"Tudo em dia",
@@ -347,10 +403,12 @@ function plantaSVG(nivel){
 }
 
 /* ============ rotulos ============ */
-const TIPO_LB={irrigacao:"Irrigação",insumo:"Insumo",poda:"Poda",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
+/* rótulo é o que aparece na tela; o nome interno ("insumo") nunca muda, senão os registros antigos se perdem */
+const TIPO_LB={irrigacao:"Irrigação",insumo:"Produto",poda:"Poda",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
 const METODOS=["Gotejo","Aspersão","Microaspersão","Mangueira","Manual"];
 const FORMAS=["Fertirrigação","Foliar","No solo","Cobertura"];
 const TIPOS_AREA=["Estufa","Canteiro","Talhão","Linha","Vaso","Outro"];
+const SITUACOES_AREA=["Ativa","Parada"];
 const TIPOS_INS=["Adubo","Biofertilizante","Defensivo","Corretivo","Outro"];
 const UNIDADES=["L","mL","kg","g","un"];
 
@@ -584,7 +642,8 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const VOCAB_VERSAO = 4;
+const APP_VERSAO = "7 · verbos";
+const VOCAB_VERSAO = 6;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -643,6 +702,7 @@ async function juntarDuplicatas(){
       if(!fica.obs && o.obs) fica.obs = o.obs;
       for(const r of S.registros)  if(r.areaId === o.id){ r.areaId = fica.id; await put("registros", r); }
       for(const pl of S.plantios)  if(pl.areaId === o.id){ pl.areaId = fica.id; await put("plantios", pl); }
+      for(const md of S.mudas)     if(md.areaId === o.id){ md.areaId = fica.id; await put("mudas", md); }
       for(const g of S.gravacoes)  if(g.areaId === o.id){ g.areaId = fica.id; await put("gravacoes", g); }
       await del("areas", o.id);
       S.areas = S.areas.filter(a => a.id !== o.id);
@@ -685,6 +745,7 @@ async function repontar(deId, paraId, campo){
   for(const r of S.registros) if(r[campo] === deId){ r[campo] = paraId; await put("registros", r); }
   if(campo === "areaId"){
     for(const p of S.plantios)  if(p.areaId === deId){ p.areaId = paraId; await put("plantios", p); }
+    for(const m of S.mudas)     if(m.areaId === deId){ m.areaId = paraId; await put("mudas", m); }
     for(const g of S.gravacoes) if(g.areaId === deId){ g.areaId = paraId; await putBruto("gravacoes", g); }
   }
 }
@@ -749,6 +810,7 @@ async function repararOrfaos(){
       if(m){ r.areaId = m.item.id; mudou = true; }
     }
 
+    if(r.mudaId && !S.mudas.some(m => m.id === r.mudaId)){ r.mudaId = null; mudou = true; }
     if(r.insumoId && !temInsumo.has(r.insumoId)){ r.insumoId = null; mudou = true; }
     if(r.tipo === "insumo" && !r.insumoId && r.fala){
       const m = acharNoTexto(normalizarFala(r.fala), S.insumos, termosDoInsumo, 0.72);
@@ -758,6 +820,19 @@ async function repararOrfaos(){
     if(mudou){ await put("registros", r); reparados++; }
   }
   return reparados;
+}
+
+/* Toda área nasce Ativa. A Estufa 3 é a única que o Rob disse estar parada —
+   e ele muda isso com um toque se for o caso. Roda uma vez só. */
+const AREAS_PARADAS_DE_INICIO = ["estufa 3"];
+async function migrarSituacaoDasAreas(){
+  let n = 0;
+  for(const a of S.areas){
+    if(a.situacao) continue;
+    a.situacao = AREAS_PARADAS_DE_INICIO.includes(normalizarFala(a.nome)) ? "parada" : "ativa";
+    await put("areas", a); n++;
+  }
+  return n;
 }
 
 async function instalarVocabulario(){
@@ -875,6 +950,43 @@ function termosDaArea(a){
 }
 const termosDoInsumo = i => [...new Set([i.nome].concat(i.apelidos||[]).map(normalizarFala))].filter(x => x.length >= 3);
 
+/* Muda sempre tem número: "jaca 1", "jaca 2". É o número que tira a ambiguidade
+   quando há três jacas na mesma linha. A espécie sozinha é tratada à parte. */
+function termosDaMuda(m){
+  const e = normalizarFala(m.especie), n = m.numero || 1;
+  const formas = [e + " " + n, e + " numero " + n];
+  (m.apelidos || []).forEach(x => formas.push(normalizarFala(x)));
+  return [...new Set(formas)].filter(x => x.length >= 3);
+}
+
+/* Acha a muda citada na frase.
+   Devolve {muda} quando não há dúvida, ou {candidatas} quando ele disse só a
+   espécie e existe mais de uma — aí quem decide é o toque, não o chute. */
+function acharMuda(frag, mudas, areaId){
+  if(!mudas || !mudas.length) return null;
+  const alvo = areaId ? mudas.filter(m => m.areaId === areaId) : mudas;
+  if(!alvo.length) return null;
+
+  const exato = acharNoTexto(frag, alvo, termosDaMuda, 0.78);
+  if(exato) return {muda: exato.item};
+
+  /* só a espécie: exigente de propósito, "cafe" e "cada" são parecidos demais */
+  const especies = [...new Set(alvo.map(m => normalizarFala(m.especie)))].filter(e => e.length >= 4);
+  const achou = acharNoTexto(frag, especies.map(e => ({id:e})), x => [x.id], 0.85);
+  if(!achou) return null;
+  const cands = alvo.filter(m => normalizarFala(m.especie) === achou.item.id);
+  if(cands.length === 1) return {muda: cands[0]};
+  if(cands.length > 1) return {candidatas: cands};
+  return null;
+}
+
+/* palavras que dizem como a planta está. Só valem quando uma muda foi identificada. */
+const SAUDE_RE = [
+  [/\b(doente|morrend|morreu|secou|seca total|praga|fungo|atacad|murch|apodrec|podre|perdid)/, "problema"],
+  [/\b(amarel|manchad|fraca|fraco|fraquinh|caindo|atencao|preocupad|estranh|feia|feio)/, "atencao"],
+  [/\b(bem|boa|bom|otima|otimo|recuperad|saudavel|sadia|forte|florind|frutificand|carregad|bonita|bonito)/, "bem"]
+];
+
 /* procura o item da lista mais parecido com algum trecho da fala */
 function acharNoTexto(txt, itens, termosDe, minSim){
   const toks = txt.split(" ");
@@ -945,7 +1057,10 @@ function areasDaFrase(frag, areas){
   return achadas;
 }
 
-const ACOES = [
+/* Estes são os verbos que o app já vem sabendo. A partir daqui eles são apenas a
+   SEMENTE: assim que entram no banco, quem manda é a lista do aparelho — e o dono
+   pode acrescentar os verbos dele sem ninguém mexer no código. */
+const VOCAB_ACOES = [
   {p:"reguei", tipo:"irrigacao", ouvidos:["cheguei","peguei","seguei","leguei","reguei a","regue","rega","regar","reguem","reguei o"]},
   {p:"regei",  tipo:"irrigacao", ouvidos:[]},
   {p:"regamos",tipo:"irrigacao", ouvidos:[]},
@@ -968,10 +1083,48 @@ const ACOES = [
   {p:"semeei", tipo:"plantio", ouvidos:["semear","semeou"]},
   {p:"comecei o plantio", tipo:"plantio", ouvidos:["comecei plantio","comecou o plantio","comece o plantio"]},
   {p:"colhi",  tipo:"colheita", ouvidos:["colher","colhe","colheu","corri"]},
-  {p:"colhemos",tipo:"colheita", ouvidos:[]}
+  {p:"colhemos",tipo:"colheita", ouvidos:[]},
+  {p:"cortei",  tipo:"poda", ouvidos:["corte","cortar","cortou","cortamos"]},
+  {p:"limpei",  tipo:"poda", ouvidos:["limpar","limpou","limpeza","fiz a limpeza"]},
+  {p:"replantei",tipo:"plantio", ouvidos:["replantar","replantou","replante"]},
+  {p:"transplantei",tipo:"plantio", ouvidos:["transplantar","transplantou","mudei de vaso","troquei de vaso","troquei o vaso"]},
+  {p:"borrifei",tipo:"insumo", forma:"Foliar", ouvidos:["borrifar","borrifou","borrifada"]}
 ];
-const termosDaAcao = a => [a.p].concat(a.ouvidos || []);
-const acharAcao = txt => acharNoTexto(txt, ACOES, termosDaAcao, 0.74);
+const listaAcoes = () => (S.acoes && S.acoes.length) ? S.acoes : VOCAB_ACOES;
+const palavraDaAcao = a => a.palavra || a.p;
+const termosDaAcao = a => [palavraDaAcao(a)].concat(a.ouvidos || []);
+const acharAcao = (txt, acoes) => acharNoTexto(txt, acoes || listaAcoes(), termosDaAcao, 0.74);
+const idAcao = palavra => idCanonico("acao", palavra);
+
+/* instala os verbos que faltam, sem tocar nos que o dono já ensinou */
+async function instalarAcoes(){
+  let novos = 0;
+  for(const v of VOCAB_ACOES){
+    const id = idAcao(v.p);
+    if(S.acoes.some(a => a.id === id)) continue;
+    const o = {id, palavra:v.p, tipo:v.tipo, forma:v.forma || null,
+               ouvidos:(v.ouvidos||[]).slice(), criadoEm:new Date().toISOString()};
+    await put("acoes", o); S.acoes.push(o); novos++;
+  }
+  return novos;
+}
+
+/* aprende uma palavra nova como sinônimo, ou cria o verbo se ele não existir */
+async function ensinarVerbo(palavra, tipo){
+  const p = normalizarFala(palavra); if(!p) return null;
+  let alvo = listaAcoes().find(a => a.tipo === tipo && S.acoes.some(x => x.id === a.id));
+  if(!alvo){
+    alvo = {id: idAcao(p), palavra: p, tipo, forma: null, ouvidos: [], criadoEm: new Date().toISOString()};
+    await put("acoes", alvo); S.acoes.push(alvo);
+    return alvo;
+  }
+  if(normalizarFala(palavraDaAcao(alvo)) === p) return alvo;
+  alvo.ouvidos = [...new Set((alvo.ouvidos || []).concat(p))];
+  await put("acoes", alvo);
+  const ix = S.acoes.findIndex(x => x.id === alvo.id);
+  if(ix >= 0) S.acoes[ix] = alvo;
+  return alvo;
+}
 
 const METODOS_RE = [[/\bmicro ?aspers/,"Microaspersão"],[/\bgotej/,"Gotejo"],[/\baspers|aspersor/,"Aspersão"],
                     [/\bmangueir/,"Mangueira"],[/\bregador|balde|manual/,"Manual"]];
@@ -1045,6 +1198,8 @@ function interpretar(falaOriginal, ctx){
   ctx = ctx || {};
   const areas   = ctx.areas   || S.areas;
   const insumos = ctx.insumos || S.insumos;
+  const mudas   = ctx.mudas   || S.mudas;
+  const acoes   = ctx.acoes   || listaAcoes();
   const hoje    = ctx.hoje    || todayISO();
 
   const base = normalizarFala(falaOriginal);
@@ -1057,11 +1212,12 @@ function interpretar(falaOriginal, ctx){
     if(/\bde manha|pela manha\b/.test(frag)) d.hora = "08:00";
     else if(/\bde tarde|a tarde|pela tarde\b/.test(frag)) d.hora = "15:00";
 
-    const acao = acharAcao(frag);
+    const acao = acharAcao(frag, acoes);
     const ins  = acharNoTexto(frag, insumos, termosDoInsumo, 0.72);
 
     if(acao){
       d.tipo = acao.item.tipo;
+      d.acaoId = acao.item.id || null;
       if(acao.item.forma) d.forma = acao.item.forma;
       /* "reguei" com um insumo na frase é aplicação, não rega */
       if(d.tipo === "irrigacao" && ins) d.tipo = "insumo";
@@ -1076,6 +1232,19 @@ function interpretar(falaOriginal, ctx){
     if(ar){ d.areaId = ar.item.id; areaHerdada = ar.item.id; d.areaConfianca = ar.s; }
     else if(areaHerdada && d.tipo !== "observacao") d.areaId = areaHerdada;
     d.areasCitadas = ar ? areasDaFrase(frag, areas).map(a => a.id) : [];
+
+    /* a muda citada. Se ele nomeou a muda e não a linha, a linha vem junto de graça. */
+    if(d.tipo !== "plantio"){
+      const mm = acharMuda(frag, mudas, d.areaId);
+      if(mm && mm.muda){
+        d.mudaId = mm.muda.id;
+        if(!d.areaId){ d.areaId = mm.muda.areaId; areaHerdada = mm.muda.areaId; }
+      } else if(mm && mm.candidatas){
+        d.mudasCandidatas = mm.candidatas.map(m => m.id);
+      }
+      if(d.mudaId || d.mudasCandidatas)
+        for(const [re, v] of SAUDE_RE) if(re.test(frag)){ d.saudeMuda = v; break; }
+    }
 
     const n = x => parseFloat(String(x).replace(",","."));
     const min = frag.match(/(\d+(?:[.,]\d+)?)\s*(?:minutos?|min\b)/);
@@ -1097,9 +1266,12 @@ function interpretar(falaOriginal, ctx){
       for(const [re,v] of FORMAS_RE) if(re.test(frag)){ d.forma = v; break; }
     } else if(d.tipo === "plantio"){
       if(uni) d.quantidade = n(uni[1]);
-      const cult = frag.match(/\b(?:plantei|plantamos|semeei|plantio\s+de)\s+(?:\d+\s+(?:mudas?|pes?|plantas?|sementes?|covas?)\s+(?:de\s+)?)?([a-z]{3,20})/);
-      if(cult && !/^(na|no|nas|nos|em|uma?|dia)$/.test(cult[1]))
-        d.cultura = cult[1].replace(/\b\w/, c => c.toUpperCase());
+      /* "plantei jaca", "plantei 3 jacas", "plantei 20 mudas de alface" */
+      const cult = frag.match(/\b(?:plantei|plantamos|semeei|plantio\s+de)\s+(?:(\d+)\s+)?(?:mudas?|pes?|plantas?|sementes?|covas?)?\s*(?:de\s+)?([a-z]{3,20})/);
+      if(cult && !/^(na|no|nas|nos|em|uma?|dia|dias)$/.test(cult[2])){
+        d.cultura = capitalizar(singular(cult[2]));
+        if(!d.quantidade && cult[1]) d.quantidade = n(cult[1]);
+      }
     } else if(d.tipo === "colheita"){
       if(kg){ d.quantidade = n(kg[1]); d.unidade = "kg"; }
       else if(gr){ d.quantidade = n(gr[1]); d.unidade = "g"; }
@@ -1174,7 +1346,7 @@ function formIrrigacao(pre){
 function formInsumo(pre){
   if(needAreas()) return; pre=pre||{};
   if(!S.insumos.length){
-    const w=el("div"); w.appendChild(el("p",null,"Cadastre o insumo uma vez — nome, unidade e a carência, se souber. Depois ele fica pronto pra sempre."));
+    const w=el("div"); w.appendChild(el("p",null,"Cadastre o produto uma vez — nome, unidade e a carência, se souber. Depois ele fica pronto pra sempre."));
     openSheet("Cadastre um insumo primeiro",w,[btn("Cadastrar insumo","pri",()=>formCadInsumo(null,()=>formInsumo(pre)))]); return;
   }
   const eb=errBox(), w=el("div"); w.appendChild(eb);
@@ -1185,8 +1357,8 @@ function formInsumo(pre){
   fIns.onchange=()=>{ const i=insumoById(fIns.value); if(i&&i.unidade) fUni.value=i.unidade; };
   const snap=()=>Object.assign({},pre,{insumoId:fIns.value,quantidade:fQtd.value,unidade:fUni.value,forma:fForma.value(),data:fData.value,obs:fObs.value});
   w.appendChild(campoArea(fArea, na=>formInsumo(Object.assign(snap(),{areaId:na.id}))));
-  const fi=el("div"); fi.appendChild(field("Insumo",fIns));
-  const nv=el("button","linkbtn","+ Cadastrar novo insumo");
+  const fi=el("div"); fi.appendChild(field("Produto",fIns));
+  const nv=el("button","linkbtn","+ Cadastrar novo produto");
   nv.onclick=()=>formCadInsumo(null, novo=>formInsumo(Object.assign(snap(),{insumoId:novo.id, unidade:novo.unidade||""})));
   fi.appendChild(nv); w.appendChild(fi);
   const t=el("div","two"); t.appendChild(field("Quantidade",fQtd)); t.appendChild(field("Unidade",fUni)); w.appendChild(t);
@@ -1195,14 +1367,14 @@ function formInsumo(pre){
   w.appendChild(field("Observação",fObs));
   openSheet("Registrar insumo",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
-    if(!fIns.value) return showErr(eb,"Escolha o insumo.");
+    if(!fIns.value) return showErr(eb,"Escolha o produto.");
     const r={id:uid(),tipo:"insumo",areaId:fArea.value,insumoId:fIns.value,quantidade:num(fQtd.value),unidade:fUni.value,
              forma:fForma.value(),data:fData.value||todayISO(),hora:pre.hora||nowHM(),obs:fObs.value.trim(),
              gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
     await salvarRegistro(r,pre);
     const i=insumoById(r.insumoId);
     if(i&&i.carencia) toast("Registrado. Carência de "+i.carencia+" dias: não colher antes de "+fmtDay(new Date(dayStart(r.data)+i.carencia*MS_DAY).toISOString().slice(0,10)));
-    else toast("Insumo registrado");
+    else toast("Produto registrado");
   })]);
 }
 
@@ -1220,14 +1392,16 @@ function formPlantio(pre){
   openSheet("Registrar plantio",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fArea.value) return showErr(eb,"Escolha a área.");
     if(!fCult.value.trim()) return showErr(eb,"Diga o que foi plantado.");
-    const p={id:uid(),areaId:fArea.value,cultura:fCult.value.trim(),variedade:fVar.value.trim(),
-             dataPlantio:fData.value||todayISO(),quantidade:num(fQtd.value),previsao:fCol.value||null,
-             status:"ativo",obs:fObs.value.trim(),criadoEm:new Date().toISOString()};
-    await put("plantios",p); S.plantios.push(p);
-    const r={id:uid(),tipo:"plantio",areaId:p.areaId,plantioId:p.id,cultura:p.cultura,variedade:p.variedade,
-             quantidade:p.quantidade,data:p.dataPlantio,hora:pre.hora||nowHM(),obs:p.obs,
+    const qtd=num(fQtd.value);
+    const feitas=await criarMudas(fArea.value,fCult.value.trim(),qtd||1,
+      {desdeEm:fData.value||todayISO(), variedade:fVar.value.trim(), obs:fObs.value.trim()});
+    const r={id:uid(),tipo:"plantio",areaId:fArea.value,cultura:capitalizar(singular(fCult.value.trim())),
+             variedade:fVar.value.trim(),quantidade:qtd,data:fData.value||todayISO(),hora:pre.hora||nowHM(),
+             obs:fObs.value.trim(),mudaId:feitas.length===1?feitas[0].id:null,
              gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
-    await salvarRegistro(r,pre); toast("Plantio registrado");
+    await salvarRegistro(r,pre);
+    toast(feitas.length===1 ? feitas[0].especie+" "+feitas[0].numero+" cadastrada"
+                            : feitas.length+" mudas cadastradas");
   })]);
 }
 
@@ -1308,27 +1482,56 @@ async function salvarRegistro(r,pre){
   closeSheet(); render();
 }
 
+/* Cria n mudas de uma espécie numa área, numerando a partir do que já existe.
+   Devolve as mudas criadas — quem chama decide o que dizer. */
+const MAX_MUDAS_DE_UMA_VEZ = 10;
+async function criarMudas(areaId, especie, quantos, extra){
+  const nome = capitalizar(singular(String(especie||"").trim()));
+  if(!nome || !areaId) return [];
+  const n = Math.max(1, Math.min(MAX_MUDAS_DE_UMA_VEZ, Math.round(quantos || 1)));
+  const feitas = [];
+  for(let k = 0; k < n; k++){
+    const numero = proximoNumero(areaId, nome);
+    const m = Object.assign({
+      id: idMuda(areaId, nome, numero), areaId, especie: nome, numero,
+      saude: "bem", desdeEm: todayISO(), apelidos: [], obs: "",
+      criadoEm: new Date().toISOString()
+    }, extra || {});
+    m.id = idMuda(areaId, nome, numero); m.numero = numero;
+    await put("mudas", m);
+    const ix = S.mudas.findIndex(x => x.id === m.id);
+    if(ix >= 0) S.mudas[ix] = m; else S.mudas.push(m);
+    feitas.push(m);
+  }
+  return feitas;
+}
+
 /* ============ cadastros ============ */
 function formArea(existing,then,sugestao){
   const a=existing||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
   const fNome=input("text",a.nome||sugestao||"","ex: Estufa 1");
   const fTipo=chipGroup(TIPOS_AREA,a.tipo||null);
+  const fSit=chipGroup(SITUACOES_AREA, a.situacao==="parada"?"Parada":"Ativa");
   const fFreq=input("number",a.frequencia||"","ex: 3");
   const fApel=input("text",(a.apelidos||[]).join(", "),"ex: estufa um, estufa de cima");
   const fObs=textarea(a.obs||"","opcional");
   w.appendChild(field("Nome",fNome));
   w.appendChild(field("Tipo",fTipo));
+  w.appendChild(field("Situação",fSit,"Parada sai da agenda e não deixa a plantinha vermelha. Quando voltar, os combinados recomeçam a contar do dia da volta."));
   w.appendChild(field("Irrigar a cada quantos dias?",fFreq,"É isso que faz a plantinha da tela inicial ficar vermelha quando atrasa. Deixe em branco se você irriga por observação, não por calendário."));
   w.appendChild(field("Como você fala",fApel,"Separe por vírgula. Vai servir pro comando de voz reconhecer a área."));
   w.appendChild(field("Observação",fObs));
   const foot=[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
     if(!fNome.value.trim()) return showErr(eb,"Dê um nome pra área.");
+    const sitNova=fSit.value()==="Parada"?"parada":"ativa";
     const o={id:a.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),frequencia:num(fFreq.value),
+             situacao:sitNova,
              apelidos:fApel.value.split(",").map(s=>s.trim()).filter(Boolean),obs:fObs.value.trim(),
              criadoEm:a.criadoEm||new Date().toISOString()};
     await put("areas",o);
     const ix=S.areas.findIndex(x=>x.id===o.id); if(ix>=0)S.areas[ix]=o; else S.areas.push(o);
+    if(a.situacao==="parada" && sitNova==="ativa") await mudarSituacaoArea(o,"ativa");
     await sincronizarRegraDeRega(o);
     closeSheet(); render(); toast(existing?"Área atualizada":"Área cadastrada"); if(then)then(o);
   })];
@@ -1336,6 +1539,57 @@ function formArea(existing,then,sugestao){
     await del("areas",a.id); S.areas=S.areas.filter(x=>x.id!==a.id); closeSheet(); go("mais"); toast("Área excluída");
   })));
   openSheet(existing?"Editar área":"Nova área",w,foot);
+}
+
+/* cadastro/edição de uma muda */
+function formMuda(existing, pre){
+  if(needAreas()) return; pre = pre || {};
+  const m = existing || {};
+  const eb = errBox(), w = el("div"); w.appendChild(eb);
+  const fArea = selectEl(areaOptions(), m.areaId || pre.areaId || defArea(pre));
+  const fEsp  = input("text", m.especie || pre.especie || "", "ex: jaca, café, abacate");
+  const fNum  = input("number", m.numero || "", "deixe em branco pro próximo");
+  const fSau  = chipGroup(SAUDES.map(s => SAUDE_LB[s]), SAUDE_LB[m.saude || "bem"]);
+  const fDes  = input("date", (m.desdeEm || todayISO()));
+  const fApel = input("text", (m.apelidos || []).join(", "), "ex: jaca da ponta");
+  const fObs  = textarea(m.obs || "", "o que essa planta tem de particular");
+  w.appendChild(field("Área", fArea));
+  w.appendChild(field("Espécie", fEsp));
+  w.appendChild(field("Número", fNum, "Duas jacas na mesma linha viram jaca 1 e jaca 2. É assim que a fala nunca fica ambígua."));
+  w.appendChild(field("Como ela está", fSau));
+  w.appendChild(field("Desde quando", fDes));
+  w.appendChild(field("Como você fala dela", fApel, "Separe por vírgula. Opcional."));
+  w.appendChild(field("Observação", fObs));
+
+  const foot = [btn("Cancelar","sec",()=>closeSheet()), btn("Salvar","pri", async () => {
+    if(!fArea.value) return showErr(eb, "Escolha a área.");
+    if(!fEsp.value.trim()) return showErr(eb, "Diga qual é a espécie.");
+    const esp = capitalizar(singular(fEsp.value.trim()));
+    const areaId = fArea.value;
+    const numero = num(fNum.value) || (existing && existing.areaId === areaId && existing.especie === esp
+                     ? existing.numero : proximoNumero(areaId, esp));
+    const novo = {id: idMuda(areaId, esp, numero), areaId, especie: esp, numero,
+                  saude: SAUDES.find(s => SAUDE_LB[s] === fSau.value()) || "bem",
+                  desdeEm: fDes.value || todayISO(),
+                  apelidos: fApel.value.split(",").map(s=>s.trim()).filter(Boolean),
+                  obs: fObs.value.trim(), criadoEm: m.criadoEm || new Date().toISOString()};
+    if(existing && existing.id !== novo.id){
+      for(const r of S.registros) if(r.mudaId === existing.id){ r.mudaId = novo.id; await put("registros", r); }
+      await del("mudas", existing.id);
+      S.mudas = S.mudas.filter(x => x.id !== existing.id);
+    }
+    await put("mudas", novo);
+    const ix = S.mudas.findIndex(x => x.id === novo.id);
+    if(ix >= 0) S.mudas[ix] = novo; else S.mudas.push(novo);
+    closeSheet(); render(); toast(existing ? "Muda atualizada" : nomeMuda(novo) + " cadastrada");
+  })];
+  if(existing) foot.unshift(btn("Excluir","dng", () => confirmDel("Excluir " + nomeMuda(m) + "?",
+    "Os registros dela continuam no diário, ligados à linha.", async () => {
+      for(const r of S.registros) if(r.mudaId === m.id){ r.mudaId = null; await put("registros", r); }
+      await del("mudas", m.id); S.mudas = S.mudas.filter(x => x.id !== m.id);
+      closeSheet(); stack = {tipo:"area", id: m.areaId}; render(); toast("Muda excluída");
+    })));
+  openSheet(existing ? "Editar muda" : "Nova muda", w, foot);
 }
 
 function formCadInsumo(existing,then,sugestao){
@@ -1350,17 +1604,17 @@ function formCadInsumo(existing,then,sugestao){
   w.appendChild(field("Carência (dias)",fCar,"Quantos dias esperar entre aplicar e colher. O app te avisa."));
   w.appendChild(field("Observação",fObs));
   const foot=[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),btn("Salvar","pri",async()=>{
-    if(!fNome.value.trim()) return showErr(eb,"Dê um nome ao insumo.");
+    if(!fNome.value.trim()) return showErr(eb,"Dê um nome ao produto.");
     const o={id:i.id||uid(),nome:fNome.value.trim(),tipo:fTipo.value(),unidade:fUni.value(),
              carencia:num(fCar.value),obs:fObs.value.trim(),criadoEm:i.criadoEm||new Date().toISOString()};
     await put("insumos",o);
     const ix=S.insumos.findIndex(x=>x.id===o.id); if(ix>=0)S.insumos[ix]=o; else S.insumos.push(o);
-    closeSheet(); render(); toast(existing?"Insumo atualizado":"Insumo cadastrado"); if(then)then(o);
+    closeSheet(); render(); toast(existing?"Produto atualizado":"Produto cadastrado"); if(then)then(o);
   })];
   if(existing) foot.unshift(btn("Excluir","dng",()=>confirmDel("Excluir \""+i.nome+"\"?","Os registros continuam no diário.",async()=>{
-    await del("insumos",i.id); S.insumos=S.insumos.filter(x=>x.id!==i.id); closeSheet(); screenInsumos(); toast("Insumo excluído");
+    await del("insumos",i.id); S.insumos=S.insumos.filter(x=>x.id!==i.id); closeSheet(); screenInsumos(); toast("Produto excluído");
   })));
-  openSheet(existing?"Editar insumo":"Novo insumo",w,foot);
+  openSheet(existing?"Editar produto":"Novo produto",w,foot);
 }
 
 
@@ -1372,7 +1626,8 @@ function formCadInsumo(existing,then,sugestao){
 
 const idRegra = (areaId, tipo, insumoId) => "regra-" + areaId + "-" + tipo + (insumoId ? "-" + insumoId : "");
 
-function regrasAtivas(){ return S.regras.filter(r => r.status !== "encerrada" && !r.pausadaAte); }
+/* área parada não cobra nada: sai da agenda, do contador e da plantinha */
+function regrasAtivas(){ return S.regras.filter(r => r.status !== "encerrada" && !r.pausadaAte && !areaParada(r.areaId)); }
 
 function casaComRegra(reg, r){
   return r.areaId === reg.areaId && r.tipo === reg.tipo &&
@@ -1383,7 +1638,9 @@ function ultimaExecucao(reg){
   return datas.length ? datas[datas.length - 1] : null;
 }
 function proximaDe(reg){
-  const base = ultimaExecucao(reg) || reg.desdeEm || (reg.criadoEm || "").slice(0, 10) || todayISO();
+  let base = ultimaExecucao(reg) || reg.desdeEm || (reg.criadoEm || "").slice(0, 10) || todayISO();
+  /* área que voltou a funcionar conta do dia da volta, não de onde parou */
+  if(reg.reiniciadoEm && reg.reiniciadoEm > base) base = reg.reiniciadoEm;
   return new Date(dayStart(base) + reg.frequencia * MS_DAY).toISOString().slice(0, 10);
 }
 /* >0 atrasada, 0 vence hoje, <0 ainda falta */
@@ -1427,6 +1684,17 @@ async function sincronizarRegraDeRega(a){
     }));
   } else if(ja && ja.status !== "encerrada"){
     await salvarRegra(Object.assign({}, ja, {status:"encerrada"}));
+  }
+}
+
+/* liga/desliga a área. Ao voltar, os combinados recomeçam a contar de hoje. */
+async function mudarSituacaoArea(a, nova){
+  a.situacao = nova;
+  await put("areas", a);
+  const ix = S.areas.findIndex(x => x.id === a.id); if(ix >= 0) S.areas[ix] = a;
+  if(nova === "ativa"){
+    for(const r of S.regras.filter(r => r.areaId === a.id && r.status !== "encerrada"))
+      await salvarRegra(Object.assign({}, r, {reiniciadoEm: todayISO()}));
   }
 }
 
@@ -1518,13 +1786,15 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       b.appendChild(el("div","dot d-" + d.tipo));
       const bd = el("div","bd");
       const a = d.areaId ? areaById(d.areaId) : null;
-      bd.appendChild(el("div","t1", esc(TIPO_LB[d.tipo]) + (a ? " · " + esc(a.nome) : "")));
+      const md = d.mudaId ? mudaById(d.mudaId) : null;
+      bd.appendChild(el("div","t1", esc(TIPO_LB[d.tipo]) + (a ? " · " + esc(a.nome) : "") + (md ? " · " + esc(nomeMuda(md)) : "")));
       const desc = descRegistro(d);
       if(desc) bd.appendChild(el("div","t2", esc(desc)));
       const faltas = [];
       if(!d.areaId && d.tipo !== "observacao") faltas.push("não entendi a área");
-      if(d.tipo === "insumo" && !d.insumoId) faltas.push("não entendi o insumo");
+      if(d.tipo === "insumo" && !d.insumoId) faltas.push("não entendi o produto");
       if(d.tipo === "plantio" && !d.cultura) faltas.push("falta a cultura");
+      if(!d.mudaId && d.mudasCandidatas && d.mudasCandidatas.length) faltas.push("qual delas?");
       if(faltas.length) bd.appendChild(el("div","t2 falta", esc(faltas.join(" · "))));
       b.appendChild(bd);
       b.appendChild(el("div","rt","editar"));
@@ -1551,9 +1821,43 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         if(bt){ const w2 = el("div"); w2.style.padding = "0 14px 12px"; w2.appendChild(bt); c.appendChild(w2); }
       }
 
+      /* ele disse "a jaca" e há três: quem decide é o toque */
+      if(!d.mudaId && d.mudasCandidatas && d.mudasCandidatas.length){
+        const bloco = el("div","escolha");
+        bloco.appendChild(el("div","sec-t","Toque na muda certa"));
+        const chips = el("div","chips");
+        d.mudasCandidatas.forEach(mid => {
+          const m = mudaById(mid); if(!m) return;
+          const ch = el("button","chip", esc(nomeMuda(m)));
+          ch.onclick = () => { d.mudaId = m.id; if(!d.areaId) d.areaId = m.areaId; desenhar(); };
+          chips.appendChild(ch);
+        });
+        bloco.appendChild(chips);
+        c.appendChild(bloco);
+      }
+
+      /* como a planta está — só aparece quando há muda; deixar em branco não muda nada */
+      if(d.mudaId){
+        const m = mudaById(d.mudaId);
+        const bl = el("div"); bl.style.padding = "0 14px 12px";
+        bl.appendChild(el("div","sec-t", "Como está " + nomeMuda(m) + "?"));
+        const chips = el("div","chips");
+        SAUDES.forEach(s => {
+          const ch = el("button","chip" + (d.saudeMuda === s ? " on" : ""), esc(SAUDE_LB[s]));
+          ch.onclick = () => { d.saudeMuda = (d.saudeMuda === s ? null : s); desenhar(); };
+          chips.appendChild(ch);
+        });
+        bl.appendChild(chips);
+        const hint = el("div","hint", m.saude === (d.saudeMuda || m.saude)
+          ? "Hoje ela está marcada como “" + SAUDE_LB[m.saude || "bem"] + "”."
+          : "Vai mudar de “" + SAUDE_LB[m.saude || "bem"] + "” para “" + SAUDE_LB[d.saudeMuda] + "”.");
+        bl.appendChild(hint);
+        c.appendChild(bl);
+      }
+
       if(d.tipo === "insumo" && !d.insumoId){
         const bloco = el("div","escolha");
-        bloco.appendChild(el("div","sec-t","Toque no insumo certo"));
+        bloco.appendChild(el("div","sec-t","Toque no produto certo"));
         const chips = el("div","chips");
         S.insumos.forEach(i => {
           const ch = el("button","chip", esc(i.nome));
@@ -1603,6 +1907,59 @@ function telaConfirmar(texto, drafts, g, previasFixas){
     lista.appendChild(c);
   });
 
+  /* Nenhum verbo reconhecido? Em vez de errar calado, ele pergunta qual palavra
+     você usou e o que ela significa — e reinterpreta a mesma frase na hora. */
+  if(drafts.length && !drafts.some(d => d.acaoId)){
+    const usados = [];
+    drafts.forEach(d => {
+      const a = d.areaId ? areaById(d.areaId) : null;
+      const i = d.insumoId ? insumoById(d.insumoId) : null;
+      const m = d.mudaId ? mudaById(d.mudaId) : null;
+      if(a) usados.push.apply(usados, termosDaArea(a).join(" ").split(" "));
+      if(i) usados.push.apply(usados, termosDoInsumo(i).join(" ").split(" "));
+      if(m) usados.push(normalizarFala(m.especie));
+    });
+    const candidatas = [...new Set(falaNorm.split(" "))].filter(t =>
+      t.length >= 4 && !/^\d/.test(t) && !PALAVRA_BOBA.test(t) &&
+      !usados.some(u => u && parecido(t, u) >= 0.7)).slice(0, 8);
+
+    if(candidatas.length){
+      const c = el("div","card"); c.style.cssText = "margin-bottom:12px;border-left:5px solid var(--amber)";
+      const bd = el("div"); bd.style.padding = "14px 16px";
+      bd.appendChild(el("div","t1","Não reconheci nenhum verbo"));
+      bd.appendChild(el("div","t2","Qual palavra você usou pra dizer o que fez? Toque nela e depois no que ela significa — eu aprendo pra sempre."));
+      c.appendChild(bd);
+
+      const linha1 = el("div","chips"); linha1.style.padding = "0 14px 12px";
+      const caixaTipo = el("div"); c.appendChild(linha1); c.appendChild(caixaTipo);
+      let escolhida = null;
+      candidatas.forEach(w => {
+        const ch = el("button","chip", esc(w));
+        ch.onclick = () => {
+          escolhida = w;
+          linha1.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.textContent === w));
+          caixaTipo.innerHTML = "";
+          const t = el("div"); t.style.padding = "0 14px 14px";
+          t.appendChild(el("div","sec-t", "“" + w + "” quer dizer o quê?"));
+          const l2 = el("div","chips");
+          ["irrigacao","insumo","poda","plantio","colheita"].forEach(tp => {
+            const b2 = el("button","chip", esc(TIPO_LB[tp]));
+            b2.onclick = async () => {
+              await ensinarVerbo(escolhida, tp);
+              toast("Aprendido. “" + escolhida + "” agora é " + TIPO_LB[tp] + ".");
+              closeSheet();
+              telaConfirmar(texto, interpretar(texto), g);
+            };
+            l2.appendChild(b2);
+          });
+          t.appendChild(l2); caixaTipo.appendChild(t);
+        };
+        linha1.appendChild(ch);
+      });
+      lista.appendChild(c);
+    }
+  }
+
   const cobrar = (ix, msg) => {
     showErr(eb, msg);
     const c = cartoes[ix];
@@ -1616,8 +1973,10 @@ function telaConfirmar(texto, drafts, g, previasFixas){
     for(let ix = 0; ix < drafts.length; ix++){
       const d = drafts[ix];
       if(d.tipo !== "observacao" && !d.areaId) return cobrar(ix, "Falta a área — toque num dos botões laranjas.");
-      if(d.tipo === "insumo" && !d.insumoId) return cobrar(ix, "Falta o insumo — toque num dos botões laranjas.");
+      if(d.tipo === "insumo" && !d.insumoId) return cobrar(ix, "Falta o produto — toque num dos botões laranjas.");
       if(d.tipo === "plantio" && !d.cultura) return cobrar(ix, "Falta dizer o que foi plantado — toque em “editar”.");
+      if(!d.mudaId && d.mudasCandidatas && d.mudasCandidatas.length)
+        return cobrar(ix, "Tem mais de uma — toque na muda certa.");
     }
     if(g){
       g.status = "processada";
@@ -1631,12 +1990,15 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       delete r.areaSugerida; delete r.insumoSugerido; delete r.areaConfianca;
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
       delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
+      const saudeNova = r.saudeMuda; delete r.saudeMuda; delete r.mudasCandidatas; delete r.acaoId;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
-      if(r.tipo === "plantio"){
-        const p = {id:uid(), areaId:r.areaId, cultura:r.cultura, variedade:r.variedade||"",
-                   dataPlantio:r.data, quantidade:r.quantidade||null, previsao:r.previsao||null,
-                   status:"ativo", obs:r.obs||"", criadoEm:new Date().toISOString()};
-        await put("plantios", p); S.plantios.push(p); r.plantioId = p.id;
+      if(r.tipo === "plantio" && r.cultura && r.areaId){
+        const feitas = await criarMudas(r.areaId, r.cultura, r.quantidade || 1, {desdeEm: r.data});
+        if(feitas.length === 1) r.mudaId = feitas[0].id;
+      }
+      if(saudeNova && r.mudaId){
+        const m = mudaById(r.mudaId);
+        if(m && m.saude !== saudeNova){ m.saude = saudeNova; await put("mudas", m); }
       }
       await put("registros", r); S.registros.push(r);
       if(r.areaId) await saveCfg({ultimaArea:r.areaId, ultimoMetodo:r.metodo || S.config.ultimoMetodo});
@@ -1689,6 +2051,7 @@ function render(){
   $("#backBtn").classList.toggle("hide",!stack);
   navBadge();
   if(stack && stack.tipo==="area") return screenAreaDetalhe(stack.id);
+  if(stack && stack.tipo==="muda") return screenMuda(stack.id);
   if(tab==="home") return screenHome();
   if(tab==="agenda") return screenAgenda();
   if(tab==="pend") return screenPendentes();
@@ -1813,7 +2176,7 @@ function escolherTipo(pre){
   const it=(ic,lb,fn)=>{ const b=el("button","menu-item"); b.appendChild(el("span","ic",ic));
     const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t); b.onclick=fn; return b; };
   c.appendChild(it("&#128167;","Irrigação",()=>formIrrigacao(pre)));
-  c.appendChild(it("&#129524;","Insumo",()=>formInsumo(pre)));
+  c.appendChild(it("&#129524;","Produto",()=>formInsumo(pre)));
   c.appendChild(it("&#9986;","Poda",()=>formPoda(pre)));
   c.appendChild(it("&#127793;","Plantio",()=>formPlantio(pre)));
   c.appendChild(it("&#127807;","Colheita",()=>formColheita(pre)));
@@ -1865,7 +2228,8 @@ function rowRegistro(r,showArea){
   if(r.foto) b.appendChild(imgFrom(r.foto,"thumb"));
   else b.appendChild(el("div","dot d-"+r.tipo));
   const bd=el("div","bd");
-  bd.appendChild(el("div","t1", esc(TIPO_LB[r.tipo])+(showArea&&a?" · "+esc(a.nome):"")));
+  const md=r.mudaId?mudaById(r.mudaId):null;
+  bd.appendChild(el("div","t1", esc(TIPO_LB[r.tipo])+(md?" · "+esc(nomeMuda(md)):(showArea&&a?" · "+esc(a.nome):""))));
   const d=descRegistro(r); if(d) bd.appendChild(el("div","t2",esc(d)));
   b.appendChild(bd);
   b.appendChild(el("div","rt",esc(r.hora||"")));
@@ -1886,9 +2250,11 @@ function verRegistro(r){
   const w=el("div"); const c=el("div","card"); c.style.padding="4px 16px";
   const kv=(k,val)=>{ if(val==null||val==="")return; const d=el("div","kv");
     d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
-  kv("Tipo",TIPO_LB[r.tipo]); kv("Área",a?a.nome:"—"); kv("Data",fmtDay(r.data)); kv("Hora",r.hora);
+  const md=r.mudaId?mudaById(r.mudaId):null;
+  kv("Tipo",TIPO_LB[r.tipo]); kv("Área",a?a.nome:"—"); if(md) kv("Muda",nomeMuda(md));
+  kv("Data",fmtDay(r.data)); kv("Hora",r.hora);
   if(r.tipo==="irrigacao"){ kv("Método",r.metodo); kv("Duração",r.duracao?r.duracao+" min":null); kv("Volume",r.volume?fmtNum(r.volume)+" L":null); }
-  if(r.tipo==="insumo"){ const i=insumoById(r.insumoId); kv("Insumo",i?i.nome:null);
+  if(r.tipo==="insumo"){ const i=insumoById(r.insumoId); kv("Produto",i?i.nome:null);
     kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); kv("Forma",r.forma);
     if(i&&i.carencia) kv("Colher a partir de",fmtDay(new Date(dayStart(r.data)+i.carencia*MS_DAY).toISOString().slice(0,10))); }
   if(r.tipo==="plantio"){ kv("Cultura",r.cultura); kv("Variedade",r.variedade); kv("Quantidade",r.quantidade); }
@@ -1913,19 +2279,39 @@ function verRegistro(r){
 }
 
 /* ============ ÁREAS ============ */
+/* as mudas da linha, com o pontinho de como cada uma está */
+function faixaMudas(areaId){
+  const ms = mudasDaArea(areaId);
+  if(!ms.length) return null;
+  const w = el("div","mds");
+  ms.slice(0,8).forEach(m => {
+    const s = el("b");
+    s.appendChild(el("i","s-" + (m.saude || "bem")));
+    s.appendChild(document.createTextNode(nomeMuda(m)));
+    w.appendChild(s);
+  });
+  if(ms.length > 8) w.appendChild(el("b", null, "+" + (ms.length - 8)));
+  return w;
+}
 function cardArea(a){
-  const b=el("button","acard");
+  const parada = a.situacao === "parada";
+  const b=el("button","acard"+(parada?" off":""));
   const bd=el("div","bd");
   bd.appendChild(el("div","nm",esc(a.nome)));
-  const ps=plantiosAtivos(a.id);
-  bd.appendChild(el("div","mt", esc(ps.length? ps.map(p=>p.cultura).join(", ") : (a.tipo||"sem plantio ativo"))));
+  const ms=faixaMudas(a.id);
+  if(ms) bd.appendChild(ms);
+  else bd.appendChild(el("div","mt", esc(a.tipo || "sem mudas cadastradas")));
   b.appendChild(bd);
-  const ui=ultimaIrrigacao(a.id);
-  let cls="neutral", txt="sem irrigação";
-  if(ui){ const n=daysAgo(ui); txt=n===0?"irrigada hoje":n===1?"irrigada ontem":"há "+n+" dias";
-    if(a.frequencia) cls = n>a.frequencia?"bad": n===a.frequencia?"warn":"ok";
-    else cls = n<=2?"ok":n<=5?"warn":"bad"; }
-  b.appendChild(el("div","pill "+cls,esc(txt)));
+  if(parada){
+    b.appendChild(el("div","pill neutral","parada"));
+  } else {
+    const ui=ultimaIrrigacao(a.id);
+    let cls="neutral", txt="sem irrigação";
+    if(ui){ const n=daysAgo(ui); txt=n===0?"irrigada hoje":n===1?"irrigada ontem":"há "+n+" dias";
+      if(a.frequencia) cls = n>a.frequencia?"bad": n===a.frequencia?"warn":"ok";
+      else cls = n<=2?"ok":n<=5?"warn":"bad"; }
+    b.appendChild(el("div","pill "+cls,esc(txt)));
+  }
   b.onclick=()=>{ stack={tipo:"area",id:a.id}; render(); window.scrollTo(0,0); };
   return b;
 }
@@ -1944,8 +2330,9 @@ function screenAreaDetalhe(id){
   const hd=el("div","card"); hd.style.padding="4px 16px"; hd.style.marginBottom="18px";
   const kv=(k,val)=>{ const d=el("div","kv"); d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); hd.appendChild(d); };
   const ui=ultimaIrrigacao(a.id);
+  kv("Situação", a.situacao==="parada" ? "Parada" : "Ativa");
   kv("Última irrigação", ui?fmtAgo(ui):"nenhuma registrada");
-  if(a.frequencia){
+  if(a.frequencia && a.situacao!=="parada"){
     const atraso = ui? daysAgo(ui)-a.frequencia : null;
     kv("Combinado","a cada "+a.frequencia+" dias");
     kv("Situação", atraso==null?"sem registro": atraso>0?("atrasada "+atraso+(atraso===1?" dia":" dias")): atraso===0?"vence hoje":"em dia");
@@ -1956,6 +2343,36 @@ function screenAreaDetalhe(id){
   if(a.apelidos&&a.apelidos.length) kv("Apelidos",a.apelidos.join(", "));
   if(a.obs) kv("Observação",a.obs);
   v.appendChild(hd);
+
+  const sw=el("div"); sw.style.cssText="display:flex;gap:10px;margin:-8px 0 18px";
+  const tg=btn(a.situacao==="parada"?"Voltar a usar esta área":"Marcar como parada",
+    a.situacao==="parada"?"pri":"sec", async()=>{
+      await mudarSituacaoArea(a, a.situacao==="parada"?"ativa":"parada");
+      render(); toast(a.situacao==="parada"?"Área parada":"Área ativa de novo");
+    });
+  tg.style.flex="1"; sw.appendChild(tg); v.appendChild(sw);
+
+  const ms=mudasDaArea(a.id);
+  const sm=el("div","sec"); sm.appendChild(el("div","sec-t","Mudas nesta linha"));
+  if(ms.length){
+    const c=el("div","card");
+    ms.forEach(m=>{
+      const b=el("button","acard"); const bd2=el("div","bd");
+      bd2.appendChild(el("div","nm",esc(nomeMuda(m))));
+      const quantos=S.registros.filter(r=>r.mudaId===m.id).length;
+      bd2.appendChild(el("div","mt",esc((m.variedade?m.variedade+" · ":"")+
+        (quantos?quantos+" anotação"+(quantos>1?"ões":""):"nenhuma anotação própria"))));
+      b.appendChild(bd2);
+      b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
+        esc(SAUDE_LB[m.saude||"bem"])));
+      b.onclick=()=>{ stack={tipo:"muda",id:m.id}; render(); window.scrollTo(0,0); };
+      c.appendChild(b);
+    });
+    sm.appendChild(c);
+  } else sm.appendChild(el("div","empty","Nenhuma muda cadastrada nesta linha."));
+  const nb=btn("+ Nova muda","sec",()=>formMuda(null,{areaId:a.id})); nb.style.marginTop="10px"; nb.style.flex="1";
+  sm.appendChild(nb);
+  v.appendChild(sm);
 
   const fotos=rs.filter(r=>r.foto).sort((x,y)=>y.data.localeCompare(x.data));
   if(fotos.length){
@@ -1978,6 +2395,142 @@ function screenAreaDetalhe(id){
 }
 
 
+function screenMuda(id){
+  const m=mudaById(id); if(!m){ stack=null; return render(); }
+  const a=areaById(m.areaId);
+  head(nomeMuda(m), a?a.nome:"");
+  const v=$("#view");
+
+  const hd=el("div","card"); hd.style.padding="4px 16px"; hd.style.marginBottom="14px";
+  const kv=(k,val)=>{ if(val==null||val==="")return; const d=el("div","kv");
+    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); hd.appendChild(d); };
+  kv("Espécie",m.especie); kv("Variedade",m.variedade); kv("Linha",a?a.nome:"—");
+  kv("Desde",m.desdeEm?fmtDay(m.desdeEm)+" ("+daysAgo(m.desdeEm)+" dias)":null);
+  if(m.apelidos&&m.apelidos.length) kv("Apelidos",m.apelidos.join(", "));
+  if(m.obs) kv("Observação",m.obs);
+  v.appendChild(hd);
+
+  const sc=el("div","sec"); sc.appendChild(el("div","sec-t","Como ela está"));
+  const chips=el("div","chips"); chips.style.marginBottom="6px";
+  SAUDES.forEach(s=>{
+    const c=el("button","chip"+((m.saude||"bem")===s?" on":""),esc(SAUDE_LB[s]));
+    c.onclick=async()=>{ m.saude=s; await put("mudas",m); render(); toast(nomeMuda(m)+": "+SAUDE_LB[s]); };
+    chips.appendChild(c);
+  });
+  sc.appendChild(chips); v.appendChild(sc);
+
+  const proprios=S.registros.filter(r=>r.mudaId===m.id)
+    .sort((x,y)=>(y.data+(y.hora||"")).localeCompare(x.data+(x.hora||"")));
+  const s1=el("div","sec"); s1.appendChild(el("div","sec-t","O que você falou dela"));
+  if(proprios.length) s1.appendChild(grouped(proprios,false));
+  else s1.appendChild(el("div","empty","Nada ainda. Fale “a "+m.especie.toLowerCase()+" "+(m.numero||1)+" está…” e cai aqui."));
+  v.appendChild(s1);
+
+  const daLinha=S.registros.filter(r=>r.areaId===m.areaId && !r.mudaId)
+    .sort((x,y)=>(y.data+(y.hora||"")).localeCompare(x.data+(x.hora||""))).slice(0,25);
+  const s2=el("div","sec"); s2.appendChild(el("div","sec-t","O que veio pela linha"));
+  if(daLinha.length){
+    s2.appendChild(grouped(daLinha,false));
+    const n=el("div","empty"); n.style.cssText="text-align:left;font-size:13.5px";
+    n.textContent="Irrigação e produtos aplicados na linha inteira valem para esta muda também.";
+    s2.appendChild(n);
+  } else s2.appendChild(el("div","empty","Nada registrado nesta linha ainda."));
+  v.appendChild(s2);
+
+  const eb=btn("Editar muda","sec",()=>formMuda(m)); eb.style.flex="1"; eb.style.marginTop="8px"; v.appendChild(eb);
+}
+
+function formVerbo(existing){
+  const a = existing || {};
+  const eb = errBox(), w = el("div"); w.appendChild(eb);
+  const fPal = input("text", palavraDaAcao(a) || "", "ex: cortei, transplantei, borrifei");
+  const TIPOS = ["irrigacao","insumo","poda","plantio","colheita","observacao"];
+  const fTipo = chipGroup(TIPOS.map(t => TIPO_LB[t]), a.tipo ? TIPO_LB[a.tipo] : null);
+  const fOuv = input("text", (a.ouvidos || []).join(", "), "ex: cortar, cortou");
+  w.appendChild(field("A palavra", fPal, "Do jeito que você fala: “cortei”, não “cortar”."));
+  w.appendChild(field("Isso é o quê?", fTipo));
+  w.appendChild(field("Outras formas", fOuv, "Separe por vírgula. Vale pôr o que o celular ouve errado."));
+
+  const foot = [btn("Cancelar","sec",closeSheet), btn("Salvar","pri", async () => {
+    const p = normalizarFala(fPal.value);
+    if(!p) return showErr(eb, "Escreva a palavra.");
+    const tipo = TIPOS.find(t => TIPO_LB[t] === fTipo.value());
+    if(!tipo) return showErr(eb, "Diga o que essa palavra significa.");
+    const novo = {id: a.id || idAcao(p), palavra: p, tipo, forma: a.forma || null,
+                  ouvidos: fOuv.value.split(",").map(s => normalizarFala(s)).filter(Boolean),
+                  criadoEm: a.criadoEm || new Date().toISOString()};
+    await put("acoes", novo);
+    const ix = S.acoes.findIndex(x => x.id === novo.id);
+    if(ix >= 0) S.acoes[ix] = novo; else S.acoes.push(novo);
+    closeSheet(); screenVerbos(); toast(existing ? "Verbo atualizado" : "Verbo aprendido");
+  })];
+  if(existing) foot.unshift(btn("Excluir","dng", () => confirmDel("Excluir “" + palavraDaAcao(a) + "”?",
+    "O app deixa de entender essa palavra. Os registros antigos continuam intactos.", async () => {
+      await del("acoes", a.id); S.acoes = S.acoes.filter(x => x.id !== a.id);
+      closeSheet(); screenVerbos(); toast("Verbo excluído");
+    })));
+  openSheet(existing ? "Editar verbo" : "Novo verbo", w, foot);
+}
+
+function screenVerbos(){
+  head("Verbos","o que o app entende quando você fala"); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  const info=el("div","empty");
+  info.style.cssText="text-align:left;font-size:14px;margin-bottom:16px";
+  info.innerHTML="<b>Estas são as palavras que o app reconhece como ação.</b> "+
+    "Se você fala de um jeito que não está aqui, acrescente — ou fale e use o “Ensinar” na tela de conferência.";
+  v.appendChild(info);
+
+  ["irrigacao","insumo","poda","plantio","colheita","observacao"].forEach(tp => {
+    const arr = listaAcoes().filter(a => a.tipo === tp);
+    if(!arr.length) return;
+    const s=el("div","sec"); s.appendChild(el("div","sec-t", TIPO_LB[tp]));
+    const c=el("div","card");
+    arr.forEach(a => {
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm", esc(palavraDaAcao(a))));
+      bd.appendChild(el("div","mt", esc((a.ouvidos||[]).length ? (a.ouvidos||[]).join(", ") : "sem outras formas")));
+      b.appendChild(bd);
+      b.onclick=()=>formVerbo(a);
+      c.appendChild(b);
+    });
+    s.appendChild(c); v.appendChild(s);
+  });
+
+  const b=btn("+ Novo verbo","pri",()=>formVerbo()); b.style.marginTop="16px"; v.appendChild(b);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+
+function screenMudas(){
+  head("Mudas",""); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  if(!S.mudas.length){
+    const e=el("div","empty"); e.style.textAlign="left";
+    e.innerHTML="<b>Nenhuma muda cadastrada.</b><br><br>Fale <i>“plantei jaca na linha escondida”</i> — ou <i>“plantei 3 jacas”</i> — "+
+      "e elas nascem numeradas: jaca 1, jaca 2, jaca 3. Depois é só falar delas pelo número.";
+    v.appendChild(e);
+  } else {
+    S.areas.forEach(a=>{
+      const ms=mudasDaArea(a.id); if(!ms.length) return;
+      const s=el("div","sec"); s.appendChild(el("div","sec-t",a.nome+(a.situacao==="parada"?" · parada":"")));
+      const c=el("div","card");
+      ms.forEach(m=>{
+        const b=el("button","acard"); const bd=el("div","bd");
+        bd.appendChild(el("div","nm",esc(nomeMuda(m))));
+        bd.appendChild(el("div","mt",esc(m.desdeEm?"desde "+fmtDay(m.desdeEm):"—")));
+        b.appendChild(bd);
+        b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
+          esc(SAUDE_LB[m.saude||"bem"])));
+        b.onclick=()=>{ stack={tipo:"muda",id:m.id}; render(); window.scrollTo(0,0); };
+        c.appendChild(b);
+      });
+      s.appendChild(c); v.appendChild(s);
+    });
+  }
+  const b=btn("+ Nova muda","pri",()=>formMuda()); b.style.marginTop="16px"; v.appendChild(b);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+
 /* ============ agenda e regras ============ */
 function screenAgenda(){
   head("Agenda","");
@@ -1985,8 +2538,9 @@ function screenAgenda(){
 
   /* rede de segurança: se alguma área tem rega marcada e não virou combinado, arruma na hora */
   const faltando = S.areas.filter(a => a.frequencia > 0 && !S.regras.some(r => r.id === idRegra(a.id, "irrigacao")));
-  if(faltando.length){
-    migrarFrequencias().then(n => { if(n) render(); });
+  const semSituacao = S.areas.filter(a => !a.situacao);
+  if(faltando.length || semSituacao.length){
+    Promise.all([migrarFrequencias(), migrarSituacaoDasAreas()]).then(([n,s]) => { if(n||s) render(); });
   }
 
   const lista = tarefas();
@@ -2123,8 +2677,9 @@ function screenMais(){
   const c=el("div","card");
   c.appendChild(item("&#128197;","Combinados",S.regras.filter(r=>r.status!=="encerrada").length+"",screenRegras));
   c.appendChild(item("&#127795;","Áreas",S.areas.length+"",screenAreas));
-  c.appendChild(item("&#129524;","Insumos",S.insumos.length+"",screenInsumos));
-  c.appendChild(item("&#127793;","Plantios",S.plantios.filter(p=>p.status!=="encerrado").length+" ativos",screenPlantios));
+  c.appendChild(item("&#129524;","Produtos",S.insumos.length+"",screenInsumos));
+  c.appendChild(item("&#127793;","Mudas",S.mudas.length+"",screenMudas));
+  c.appendChild(item("&#128172;","Verbos",listaAcoes().length+"",screenVerbos));
   v.appendChild(c);
 
   const c2=el("div","card"); c2.style.marginTop="18px";
@@ -2145,14 +2700,15 @@ function screenMais(){
     const j = await juntarDuplicatas();
     const c = await canonizarIds();
     await instalarVocabulario();
+    await instalarAcoes();
     const o = await repararOrfaos();
     await load(); render();
     toast("Juntei "+j+", arrumei "+c+" e reconectei "+o+" registro(s)");
   }));
-  c3.appendChild(item("&#128221;","Recarregar meu vocabulário","áreas e insumos", async()=>{
+  c3.appendChild(item("&#128221;","Recarregar meu vocabulário","lugares e produtos", async()=>{
     const r = await instalarVocabulario(); render();
     toast(r.novas || r.novosIns || r.completadas
-      ? "Repus "+r.novas+" área(s), "+r.novosIns+" insumo(s)"+(r.completadas?" e completei "+r.completadas:"")
+      ? "Repus "+r.novas+" área(s), "+r.novosIns+" produto(s)"+(r.completadas?" e completei "+r.completadas:"")
       : "Já estava tudo lá");
   }));
   c3.appendChild(item("&#128465;","Apagar tudo","",apagarTudo));
@@ -2161,7 +2717,8 @@ function screenMais(){
   const info=el("div","empty");
   info.style.cssText="margin-top:18px;text-align:left;font-size:14px";
   const mb=(S.gravacoes.reduce((s,g)=>s+(g.blob?g.blob.size:0),0)+S.registros.reduce((s,r)=>s+(r.foto?r.foto.size:0),0))/1048576;
-  info.innerHTML="<b>Etapas 1 e 2.</b> Tudo fica dentro deste aparelho e funciona sem internet. "+
+  info.innerHTML="<b>Versão "+APP_VERSAO+".</b> Confira aqui depois de subir um arquivo novo: se o número não mudou, o app ainda é o antigo.<br><br>"+
+    "<b>Tudo fica dentro deste aparelho e funciona sem internet.</b> "+
     "Transcrever a voz, entender o que você falou, regras automáticas, avisos e o agente agrônomo vêm nas próximas etapas.<br><br>"+
     "Áudios e fotos ocupam <b>"+mb.toFixed(1)+" MB</b>.<br><br>"+
     "<b>Faça backup de vez em quando.</b> Enquanto a nuvem não existe, o arquivo de backup é a sua única cópia — mas ele não leva áudios nem fotos, só os registros.";
@@ -2169,9 +2726,9 @@ function screenMais(){
 }
 
 function screenInsumos(){
-  head("Insumos",""); tab="mais"; stack=null;
+  head("Produtos",""); tab="mais"; stack=null;
   const v=$("#view"); v.innerHTML="";
-  if(!S.insumos.length) v.appendChild(el("div","empty","Nenhum insumo cadastrado."));
+  if(!S.insumos.length) v.appendChild(el("div","empty","Nenhum produto cadastrado."));
   else{
     const c=el("div","card");
     S.insumos.forEach(i=>{
@@ -2184,48 +2741,9 @@ function screenInsumos(){
     });
     v.appendChild(c);
   }
-  const b=btn("+ Novo insumo","pri",()=>formCadInsumo()); b.style.marginTop="16px"; v.appendChild(b);
+  const b=btn("+ Novo produto","pri",()=>formCadInsumo()); b.style.marginTop="16px"; v.appendChild(b);
   const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
 }
-
-function screenPlantios(){
-  head("Plantios",""); tab="mais"; stack=null;
-  const v=$("#view"); v.innerHTML="";
-  const ativos=S.plantios.filter(p=>p.status!=="encerrado"), fim=S.plantios.filter(p=>p.status==="encerrado");
-  const bloco=(titulo,arr)=>{
-    if(!arr.length) return;
-    const s=el("div","sec"); s.appendChild(el("div","sec-t",titulo)); const c=el("div","card");
-    arr.forEach(p=>{
-      const a=areaById(p.areaId); const b=el("button","acard"); const bd=el("div","bd");
-      bd.appendChild(el("div","nm",esc(p.cultura+(p.variedade?" · "+p.variedade:""))));
-      bd.appendChild(el("div","mt",esc((a?a.nome+" · ":"")+"plantado "+fmtAgo(p.dataPlantio))));
-      b.appendChild(bd);
-      if(p.previsao){ const n=daysAgo(p.previsao); b.appendChild(el("div","pill "+(n>=0?"warn":"neutral"), n>=0?"colher!":"em "+(-n)+"d")); }
-      b.onclick=()=>verPlantio(p); c.appendChild(b);
-    });
-    s.appendChild(c); v.appendChild(s);
-  };
-  if(!S.plantios.length) v.appendChild(el("div","empty","Nenhum plantio registrado."));
-  bloco("Ativos",ativos); bloco("Encerrados",fim);
-  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
-}
-function verPlantio(p){
-  const a=areaById(p.areaId);
-  const w=el("div"); const c=el("div","card"); c.style.padding="4px 16px";
-  const kv=(k,val)=>{ if(val==null||val==="")return; const d=el("div","kv");
-    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
-  kv("Cultura",p.cultura); kv("Variedade",p.variedade); kv("Área",a?a.nome:"—");
-  kv("Plantado em",fmtDay(p.dataPlantio)+" ("+daysAgo(p.dataPlantio)+" dias)");
-  kv("Quantidade",p.quantidade); kv("Previsão",p.previsao?fmtDay(p.previsao):null);
-  kv("Situação",p.status==="encerrado"?"Encerrado":"Ativo"); kv("Observação",p.obs);
-  w.appendChild(c);
-  const foot=[btn("Fechar","sec",closeSheet)];
-  foot.push(p.status!=="encerrado"
-    ? btn("Encerrar plantio","pri",async()=>{ p.status="encerrado"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio encerrado"); })
-    : btn("Reabrir","pri",async()=>{ p.status="ativo"; await put("plantios",p); closeSheet(); screenPlantios(); toast("Plantio reaberto"); }));
-  openSheet(p.cultura,w,foot);
-}
-
 
 /* ============ sincronia ============ */
 const SYNC_URL_PADRAO = "https://tmzirofxoghzfkrsvbit.supabase.co/functions/v1/sync";
@@ -2418,8 +2936,9 @@ function screenSincronia(){
 /* ============ backup ============ */
 function semBlobs(r){ const o=Object.assign({},r); delete o.foto; return o; }
 function exportar(){
-  const data={versao:2,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
-              plantios:S.plantios,registros:S.registros.map(semBlobs),config:S.config};
+  const data={versao:4,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
+              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,regras:S.regras,
+              registros:S.registros.map(semBlobs),config:S.config};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a");
   a.href=url; a.download="caderno-campo-"+todayISO()+".json";
@@ -2434,7 +2953,7 @@ function importar(){
     try{
       const d=JSON.parse(await file.text());
       if(!d||!Array.isArray(d.registros)) throw new Error("formato");
-      for(const s of ["areas","insumos","plantios","registros"]){
+      for(const s of ["areas","insumos","plantios","mudas","acoes","regras","registros"]){
         await clearStore(s); for(const o of (d[s]||[])) await put(s,o);
       }
       if(d.config) await put("config",Object.assign({id:"app"},d.config));
@@ -2444,7 +2963,7 @@ function importar(){
   f.click();
 }
 function apagarTudo(){
-  confirmDel("Apagar tudo?","Registros, áreas, insumos, áudios e fotos deste aparelho serão apagados. Exporte um backup antes se quiser guardar.",async()=>{
+  confirmDel("Apagar tudo?","Registros, áreas, produtos, áudios e fotos deste aparelho serão apagados. Exporte um backup antes se quiser guardar.",async()=>{
     for(const s of STORES) await clearStore(s);
     await load(); closeSheet(); go("home"); toast("Tudo apagado");
   });
@@ -2485,6 +3004,11 @@ async function exemplos(){
     for(const a of areas) await put("areas",a);
     for(const i of insumos) await put("insumos",i);
     for(const p of plantios) await put("plantios",p);
+    for(const m of [
+      {id:"m1",areaId:"a3",especie:"Jaca",numero:1,saude:"atencao",desdeEm:d(400),apelidos:["jaca da ponta"],obs:"",criadoEm:new Date().toISOString()},
+      {id:"m2",areaId:"a3",especie:"Jaca",numero:2,saude:"bem",desdeEm:d(400),apelidos:[],obs:"",criadoEm:new Date().toISOString()},
+      {id:"m3",areaId:"a3",especie:"Jaca",numero:3,saude:"bem",desdeEm:d(120),apelidos:[],obs:"",criadoEm:new Date().toISOString()}
+    ]) await put("mudas",m);
     for(const r of R) await put("registros",r);
     await put("config",{id:"app",ultimaArea:"a1"});
     await load(); closeSheet(); go("home"); toast("Dados de exemplo carregados");
@@ -2501,6 +3025,8 @@ async function exemplos(){
       await instalarVocabulario();
       await repararOrfaos();
       await migrarFrequencias();
+      await migrarSituacaoDasAreas();
+      await instalarAcoes();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
@@ -2516,7 +3042,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,diasDaFrequencia,normalizarFala,fragmentar};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
