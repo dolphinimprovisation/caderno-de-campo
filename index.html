@@ -503,7 +503,7 @@ function iniciarEscuta(){
   sr.lang = "pt-BR";
   sr.continuous = !ehMobile();   /* no Android, contínuo trava: reiniciamos a cada pausa */
   sr.interimResults = true;
-  sr.maxAlternatives = 1;
+  sr.maxAlternatives = 5;   /* o Chrome já calcula outros palpites — jogar fora é desperdício */
 
   sess = {modo:"escuta", sr, inicio:Date.now(), texto:"", parcial:"", erro:null, encerrando:false, timer:null};
 
@@ -512,7 +512,7 @@ function iniciarEscuta(){
     let fin = "", par = "";
     for(let i = ev.resultIndex; i < ev.results.length; i++){
       const r = ev.results[i];
-      if(r.isFinal) fin += r[0].transcript + " "; else par += r[0].transcript;
+      if(r.isFinal) fin += melhorAlternativa(r) + " "; else par += (r[0] ? r[0].transcript : "");
     }
     if(fin){ sess.texto += fin; sess.parcial = ""; } else { sess.parcial = par; }
     sess.erro = null;
@@ -642,7 +642,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "7 · verbos";
+const APP_VERSAO = "8 · ouvido melhor";
 const VOCAB_VERSAO = 6;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -868,6 +868,77 @@ async function instalarVocabulario(){
     await put("insumos", o); S.insumos.push(o); novosIns++;
   }
   return {novas, novosIns, completadas};
+}
+
+/* ---- escolher entre os palpites do Chrome ----
+   Ele devolve "cheguei" em primeiro e às vezes "reguei" em terceiro. Como o
+   dicionário é curto e conhecido, dá pra pontuar cada palpite e ficar com o que
+   bate com o que existe de verdade no caderno. */
+/* a palavra certa já está escrita na frase? */
+function contemTermo(txt, nome){
+  const n = normalizarFala(nome);
+  return !!n && (" " + txt + " ").indexOf(" " + n + " ") >= 0;
+}
+function pontuarFala(t){
+  const x = normalizarFala(t);
+  if(!x) return 0;
+  let p = 0;
+  /* a palavra do dicionário vale mais que qualquer apelido dela: é assim que
+     "reguei" ganha de "cheguei". Comparar com o termo casado não serve, porque
+     "reguei a" também é apelido — o que vale é a palavra certa estar na frase. */
+  const peso = (m, nome) => m ? m.s * (contemTermo(x, nome) ? 1 : 0.8) : 0;
+  const a = acharAcao(x);
+  if(a) p += peso(a, palavraDaAcao(a.item));
+  const ar = acharNoTexto(x, S.areas, termosDaArea, 0.72);
+  if(ar) p += peso(ar, ar.item.nome);
+  const ins = acharNoTexto(x, S.insumos, termosDoInsumo, 0.72);
+  if(ins) p += peso(ins, ins.item.nome);
+  return p;
+}
+
+function melhorAlternativa(r){
+  if(!r || !r.length) return "";
+  let escolhido = r[0].transcript, melhor = -1;
+  for(let k = 0; k < r.length; k++){
+    if(!r[k] || !r[k].transcript) continue;
+    /* empate fica com o primeiro palpite do Chrome: não trocar à toa */
+    const p = pontuarFala(r[k].transcript) + (k === 0 ? 0.05 : 0);
+    if(p > melhor){ melhor = p; escolhido = r[k].transcript; }
+  }
+  return escolhido;
+}
+
+/* ---- a frase que fica guardada ----
+   Troca no texto só o que casou com folga, e devolve o original quando não há
+   nada a corrigir. O que o celular ouviu continua guardado do lado. */
+function corrigirFrase(original){
+  const toks = normalizarFala(original || "").split(" ").filter(Boolean);
+  if(!toks.length) return original;
+  const txt = toks.join(" ");
+  const trocas = [];
+  const marcar = (m, nome) => {
+    if(!m || m.s < 0.8) return;
+    if(contemTermo(txt, nome)) return;      /* já está escrito certo: não mexer */
+    trocas.push({i: m.i, n: m.n, por: String(nome).split(" ")});
+  };
+  const a = acharAcao(txt);
+  if(a) marcar(a, palavraDaAcao(a.item));
+  const ar = acharNoTexto(txt, S.areas, termosDaArea, 0.72);
+  if(ar) marcar(ar, ar.item.nome);
+  const ins = acharNoTexto(txt, S.insumos, termosDoInsumo, 0.72);
+  if(ins) marcar(ins, ins.item.nome);
+  if(!trocas.length) return original;
+
+  trocas.sort((x, y) => y.i - x.i);
+  const saida = toks.slice();
+  let limite = Infinity;
+  for(const t of trocas){
+    if(t.i + t.n > limite) continue;      /* não mexe num pedaço já trocado */
+    saida.splice.apply(saida, [t.i, t.n].concat(t.por));
+    limite = t.i;
+  }
+  const nova = saida.join(" ");
+  return nova === txt ? original : nova;
 }
 
 /* ============ interpretador (vocabulário fechado) ============ */
@@ -1720,7 +1791,13 @@ function tarefas(){
 function telaConfirmar(texto, drafts, g, previasFixas){
   const w = el("div");
   const eb = errBox(); w.appendChild(eb);
-  w.appendChild(el("div","fala-orig", "“" + esc(texto) + "”"));
+  const falaPolida = corrigirFrase(texto);
+  w.appendChild(el("div","fala-orig", "“" + esc(falaPolida) + "”"));
+  if(falaPolida !== texto){
+    const cru = el("div","hint"); cru.style.margin = "-8px 0 14px";
+    cru.textContent = "o celular ouviu: “" + texto + "”";
+    w.appendChild(cru);
+  }
 
   /* o combinado falado vira regra de verdade, mostrada à parte.
      Se ele falou SÓ o combinado (sem verbo de ação), nenhum registro é criado. */
@@ -1992,6 +2069,8 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
       const saudeNova = r.saudeMuda; delete r.saudeMuda; delete r.mudasCandidatas; delete r.acaoId;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
+      const polida = corrigirFrase(texto);
+      if(polida && polida !== texto) r.falaCorrigida = polida;
       if(r.tipo === "plantio" && r.cultura && r.areaId){
         const feitas = await criarMudas(r.areaId, r.cultura, r.quantidade || 1, {desdeEm: r.data});
         if(feitas.length === 1) r.mudaId = feitas[0].id;
@@ -2260,7 +2339,12 @@ function verRegistro(r){
   if(r.tipo==="plantio"){ kv("Cultura",r.cultura); kv("Variedade",r.variedade); kv("Quantidade",r.quantidade); }
   if(r.tipo==="colheita"){ kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); }
   kv("Observação",r.obs);
-  if(r.fala) kv("Você falou","“"+r.fala+"”");
+  /* vale também pros registros antigos: a correção é calculada na hora */
+  const polida = r.falaCorrigida || (r.fala ? corrigirFrase(r.fala) : "");
+  if(polida && polida !== r.fala){
+    kv("Você falou","“"+polida+"”");
+    kv("O celular ouviu","“"+r.fala+"”");
+  } else if(r.fala) kv("Você falou","“"+r.fala+"”");
   w.appendChild(c);
   if(r.foto) w.appendChild(imgFrom(r.foto,"photoprev"));
   if(r.gravacaoId){
@@ -3042,7 +3126,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
