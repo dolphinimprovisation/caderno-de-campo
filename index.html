@@ -32,6 +32,8 @@ input,select,textarea{font:inherit;color:inherit;width:100%}
 .s-bem{background:#48A55C}.s-atencao{background:#D89A16}.s-problema{background:#C4452F}
 .acard.off .nm,.acard.off .mt{opacity:.5}
 .d-muda{background:#5B4B8A}
+.d-problema{background:#C4452F}
+.probchip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#A63A28;margin-top:5px}
 .hide{display:none !important}
 
 header{
@@ -239,8 +241,8 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=6;
-const STORES=["areas","insumos","plantios","mudas","acoes","registros","regras","gravacoes","pendentes","config"];
+const DB_NAME="caderno-campo", DB_VER=7;
+const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","registros","regras","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -255,8 +257,8 @@ function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"r
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* o que viaja pra nuvem */
-const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", registros:"registro", regras:"regra"};
-const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", registro:"registros", regra:"regras"};
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", males:"mal", problemas:"problema", registros:"registro", regras:"regra"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", mal:"males", problema:"problemas", registro:"registros", regra:"regras"};
 
 async function marcarPendente(loja, id, apagado, quando){
   const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
@@ -284,12 +286,12 @@ function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly")
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], males:[], problemas:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
 /* por nome, não por posição: acrescentar uma loja não pode embaralhar o estado */
 async function load(){
   const res = await Promise.all(STORES.map(all));
   const por = {}; STORES.forEach((s,i) => por[s] = res[i] || []);
-  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes;
+  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes; S.males=por.males; S.problemas=por.problemas;
   S.registros=por.registros; S.regras=por.regras; S.gravacoes=por.gravacoes; S.pendentes=por.pendentes;
   S.config = (por.config.find(x=>x.id==="app")||{id:"app"});
 }
@@ -321,6 +323,21 @@ function proximoNumero(areaId, especie){
 const singular = s => /s$/.test(s) && s.length >= 5 ? s.slice(0,-1) : s;
 const capitalizar = s => String(s||"").replace(/^\w/, c => c.toUpperCase());
 
+/* ---- problemas ----
+   Doença e praga não são anotação de passagem: são estado. Abrem num dia, incomodam
+   enquanto duram, e fecham noutro. Enquanto abertos, cobram. */
+const malById = id => S.males.find(m => m.id === id);
+const nomeDoMal = id => (malById(id) || {}).nome || "problema";
+const idMal = nome => idCanonico("mal", nome);
+const problemasAbertos = () => S.problemas.filter(p => p.status !== "resolvido" && !areaParada(p.areaId));
+const problemasDaArea = areaId => problemasAbertos().filter(p => p.areaId === areaId);
+const problemasDaMuda = mudaId => problemasAbertos().filter(p => p.mudaId === mudaId);
+const ondeDoProblema = p => {
+  const m = p.mudaId ? mudaById(p.mudaId) : null;
+  const a = areaById(p.areaId);
+  return (m ? nomeMuda(m) + " · " : "") + (a ? a.nome : "");
+};
+
 /* ---- situação da área ---- */
 const areaParada = id => { const a = areaById(id); return !!(a && a.situacao === "parada"); };
 function mudasPorSaude(){
@@ -339,9 +356,10 @@ function saudeDaArea(areaId){
 /* ============ status geral (a plantinha) ============ */
 function statusGeral(){
   const {ruins, amarelas} = mudasPorSaude();
+  const abertos = problemasAbertos();
   const ondeM = m => nomeMuda(m) + ((areaById(m.areaId)) ? " · " + areaById(m.areaId).nome : "");
 
-  if(!S.registros.length && !S.gravacoes.length && !ruins.length && !amarelas.length)
+  if(!S.registros.length && !S.gravacoes.length && !ruins.length && !amarelas.length && !abertos.length)
     return {nivel:"ok", t:"Comece falando", s:"Toque no microfone e diga o que você fez. Depois eu organizo."};
 
   const lista = (typeof tarefas === "function") ? tarefas() : [];
@@ -365,6 +383,15 @@ function statusGeral(){
       : atrasadas.slice(0,3).map(x => nomeDaRegra(x.reg) + " (" + x.atraso + "d)").join(" · ");
     return {nivel:"atraso", t, s};
   }
+  /* problema aberto pesa mais que qualquer atraso de calendário */
+  if(abertos.length){
+    const dias = p => daysAgo(p.desdeEm);
+    const ord = abertos.slice().sort((a,b) => dias(b) - dias(a));
+    return {nivel:"atraso",
+      t: ord.length === 1 ? nomeDoMal(ord[0].malId) + " em " + ondeDoProblema(ord[0]) : ord.length + " problemas abertos",
+      s: ord.slice(0,3).map(p => nomeDoMal(p.malId) + " · " + ondeDoProblema(p) + " · há " + dias(p) + "d").join(" · ")};
+  }
+
   if(ruins.length) return blocoMudas(ruins, " com problema", "atraso");
 
   if(hoje.length)
@@ -404,7 +431,8 @@ function plantaSVG(nivel){
 
 /* ============ rotulos ============ */
 /* rótulo é o que aparece na tela; o nome interno ("insumo") nunca muda, senão os registros antigos se perdem */
-const TIPO_LB={irrigacao:"Irrigação",insumo:"Produto",poda:"Poda",plantio:"Plantio",colheita:"Colheita",observacao:"Observação"};
+const TIPO_LB={irrigacao:"Irrigação",insumo:"Produto",poda:"Poda",plantio:"Plantio",colheita:"Colheita",problema:"Problema",observacao:"Observação"};
+const TIPOS_MAL=["Doença","Praga","Deficiência","Outro"];
 const METODOS=["Gotejo","Aspersão","Microaspersão","Mangueira","Manual"];
 const FORMAS=["Fertirrigação","Foliar","No solo","Cobertura"];
 const TIPOS_AREA=["Estufa","Canteiro","Talhão","Linha","Vaso","Outro"];
@@ -418,6 +446,7 @@ function descRegistro(r){
   else if(r.tipo==="insumo"){ const i=insumoById(r.insumoId); if(i)p.push(i.nome); if(r.quantidade)p.push(fmtNum(r.quantidade)+" "+(r.unidade||"")); if(r.forma)p.push(r.forma); }
   else if(r.tipo==="plantio"){ if(r.cultura)p.push(r.cultura); if(r.variedade)p.push(r.variedade); if(r.quantidade)p.push(fmtNum(r.quantidade)+" mudas"); }
   else if(r.tipo==="colheita"){ if(r.quantidade)p.push(fmtNum(r.quantidade)+" "+(r.unidade||"kg")); }
+  else if(r.tipo==="problema"){ if(r.malId)p.push(nomeDoMal(r.malId)); if(r.fecho)p.push("resolvido"); }
   if(r.obs)p.push(r.obs);
   return p.join(" · ");
 }
@@ -642,8 +671,8 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "8 · ouvido melhor";
-const VOCAB_VERSAO = 6;
+const APP_VERSAO = "9 · problemas";
+const VOCAB_VERSAO = 7;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -1159,8 +1188,56 @@ const VOCAB_ACOES = [
   {p:"limpei",  tipo:"poda", ouvidos:["limpar","limpou","limpeza","fiz a limpeza"]},
   {p:"replantei",tipo:"plantio", ouvidos:["replantar","replantou","replante"]},
   {p:"transplantei",tipo:"plantio", ouvidos:["transplantar","transplantou","mudei de vaso","troquei de vaso","troquei o vaso"]},
-  {p:"borrifei",tipo:"insumo", forma:"Foliar", ouvidos:["borrifar","borrifou","borrifada"]}
+  {p:"borrifei",tipo:"insumo", forma:"Foliar", ouvidos:["borrifar","borrifou","borrifada"]},
+  {p:"diagnostiquei",tipo:"problema", ouvidos:["diagnosticar","diagnosticou","diagnostico","diagnostiquem"]},
+  {p:"detectei", tipo:"problema", ouvidos:["detectar","detectou","deteste"]},
+  {p:"identifiquei",tipo:"problema", ouvidos:["identificar","identificou"]},
+  {p:"apareceu", tipo:"problema", ouvidos:["apareceram","surgiu","surgiram","aparecendo"]},
+  {p:"atacou",   tipo:"problema", ouvidos:["atacaram","atacada","atacado","ataque"]}
 ];
+
+/* palavras que dizem que o problema acabou */
+const FECHA_RE = /\b(tratei|tratamos|tratado|resolvi|resolveu|resolvido|sarou|sarei|curou|curei|melhorou|controlei|controlado|sumiu|acabou|passou)\b/;
+const VOCAB_MALES = [
+  {nome:"Fundo preto",  tipo:"Deficiência", apelidos:["podridao apical","fundo podre","fundo pretinho"]},
+  {nome:"Míldio",       tipo:"Doença", apelidos:["mildio","mildiu","milidio"]},
+  {nome:"Oídio",        tipo:"Doença", apelidos:["oidio","cinza nas folhas","mofo branco"]},
+  {nome:"Ferrugem",     tipo:"Doença", apelidos:["ferruge","ferrugens"]},
+  {nome:"Antracnose",   tipo:"Doença", apelidos:["antracnoses","antracnose"]},
+  {nome:"Requeima",     tipo:"Doença", apelidos:["requeimas"]},
+  {nome:"Murcha",       tipo:"Doença", apelidos:["murchadeira","murchou"]},
+  {nome:"Pulgão",       tipo:"Praga", apelidos:["pulgao","pulgoes"]},
+  {nome:"Cochonilha",   tipo:"Praga", apelidos:["cochonilhas","cochinilha","cochonila"]},
+  {nome:"Lagarta",      tipo:"Praga", apelidos:["lagartas"]},
+  {nome:"Mosca branca", tipo:"Praga", apelidos:["moscas brancas","mosca-branca"]},
+  {nome:"Ácaro",        tipo:"Praga", apelidos:["acaro","acaros","acaro rajado"]},
+  {nome:"Formiga",      tipo:"Praga", apelidos:["formigas","sauva","sauvas"]},
+  {nome:"Nematoide",    tipo:"Praga", apelidos:["nematoides","nematoda"]}
+];
+const termosDoMal = m => [...new Set([m.nome].concat(m.apelidos||[]).map(normalizarFala))].filter(x => x.length >= 4);
+
+async function instalarMales(){
+  let novos = 0;
+  for(const v of VOCAB_MALES){
+    const id = idMal(v.nome);
+    if(S.males.some(m => m.id === id)) continue;
+    const o = {id, nome:v.nome, tipo:v.tipo, apelidos:(v.apelidos||[]).slice(), criadoEm:new Date().toISOString()};
+    await put("males", o); S.males.push(o); novos++;
+  }
+  return novos;
+}
+
+/* nome dito e desconhecido vira vocabulário na hora — como acontece com os produtos */
+async function garantirMal(nome){
+  const limpo = String(nome||"").trim(); if(!limpo) return null;
+  const id = idMal(limpo);
+  const ja = S.males.find(m => m.id === id || normalizarFala(m.nome) === normalizarFala(limpo));
+  if(ja) return ja;
+  const o = {id, nome: capitalizar(limpo), tipo:"Outro", apelidos:[], criadoEm:new Date().toISOString()};
+  await put("males", o); S.males.push(o);
+  return o;
+}
+
 const listaAcoes = () => (S.acoes && S.acoes.length) ? S.acoes : VOCAB_ACOES;
 const palavraDaAcao = a => a.palavra || a.p;
 const termosDaAcao = a => [palavraDaAcao(a)].concat(a.ouvidos || []);
@@ -1285,6 +1362,8 @@ function interpretar(falaOriginal, ctx){
 
     const acao = acharAcao(frag, acoes);
     const ins  = acharNoTexto(frag, insumos, termosDoInsumo, 0.72);
+    const ehProblema = !!(acao && acao.item.tipo === "problema");
+    const fechando = FECHA_RE.test(frag);
 
     if(acao){
       d.tipo = acao.item.tipo;
@@ -1292,6 +1371,8 @@ function interpretar(falaOriginal, ctx){
       if(acao.item.forma) d.forma = acao.item.forma;
       /* "reguei" com um insumo na frase é aplicação, não rega */
       if(d.tipo === "irrigacao" && ins) d.tipo = "insumo";
+      /* "tratei com neem" é aplicação de produto E fim do problema */
+      if(d.tipo === "problema" && fechando && ins) d.tipo = "insumo";
     } else if(ins){
       d.tipo = "insumo";
     }
@@ -1349,6 +1430,28 @@ function interpretar(falaOriginal, ctx){
       else if(uni){ d.quantidade = n(uni[1]); d.unidade = "un"; }
     }
 
+    /* Doença e praga só são procuradas quando a frase fala delas. Assim
+       "formiga" nunca aparece do nada no meio de uma rega. */
+    if(ehProblema || fechando){
+      const mal = acharNoTexto(frag, S.males, termosDoMal, 0.8);
+      if(mal) d.malId = mal.item.id;
+      else if(ehProblema){
+        const toks = frag.split(" ");
+        let resto = toks.slice(acao.i + acao.n).join(" ");
+        const com = resto.match(/\bcom\s+/);
+        if(com) resto = resto.slice(com.index + com[0].length);
+        const corte = resto.search(/\b(na|no|nas|nos|em|da|do|dos|das)\b/);
+        if(corte >= 0) resto = resto.slice(0, corte);
+        resto = resto.replace(/^(um|uma|o|a|os|as|de)\s+/, "").trim();
+        if(resto.length >= 3 && resto.split(" ").length <= 3) d.malNovo = resto;
+      }
+      if(ehProblema && (d.malId || d.malNovo)) d.tipo = d.tipo === "insumo" ? "insumo" : "problema";
+      /* "passou" é apelido de "passei" (aplicar). Mas "o fundo preto passou", sem
+         produto nenhum na frase, é o problema acabando — e aí quem manda é o mal. */
+      if(fechando && d.malId && !ins) d.tipo = "problema";
+      if(fechando) d.fecharProblema = true;
+    }
+
     const regra = frag.match(/\ba cada (\d+) (dias?|semanas?|mes(?:es)?)\b|\btod[oa]s? (?:os |as )?(dias?|semanas?|mes(?:es)?)\b|\bde (\d+) em \d+ dias?\b/);
     if(regra){
       d.regraDetectada = regra[0];
@@ -1362,6 +1465,17 @@ function interpretar(falaOriginal, ctx){
       d.alterarRegra = true;
     if(/\b(para|parar|pare|encerra|encerrar|cancela|cancelar|chega de|pode parar)\b/.test(frag) && !d.regraDias)
       d.encerrarRegra = true;
+
+    /* qual problema aberto essa frase fecha */
+    if(d.fecharProblema){
+      const candidatos = problemasAbertos().filter(p =>
+        (!d.malId || p.malId === d.malId) &&
+        (!d.areaId || p.areaId === d.areaId) &&
+        (!d.mudaId || p.mudaId === d.mudaId));
+      if(candidatos.length === 1) d.problemaId = candidatos[0].id;
+      else if(candidatos.length > 1) d.problemasCandidatos = candidatos.map(p => p.id);
+      else d.fecharProblema = false;
+    }
 
     if(d.tipo === "observacao") d.obs = falaOriginal.trim();
     drafts.push(d);
@@ -1476,6 +1590,38 @@ function formPlantio(pre){
   })]);
 }
 
+function formProblema(pre){
+  if(needAreas()) return; pre=pre||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fArea=selectEl(areaOptions(), defArea(pre));
+  const fMal=selectEl(S.males.map(m=>({label:m.nome,value:m.id})), pre.malId||"", "escolha ou escreva abaixo");
+  const fNovo=input("text", pre.malNovo||"", "ex: fundo preto, cochonilha");
+  const fData=input("date", pre.data||todayISO());
+  const fObs=textarea(pre.obs||"", "o que você viu");
+  const snap=()=>Object.assign({},pre,{malId:fMal.value,malNovo:fNovo.value,data:fData.value,obs:fObs.value});
+  w.appendChild(campoArea(fArea, na=>formProblema(Object.assign(snap(),{areaId:na.id}))));
+  const mudasAqui = () => mudasDaArea(fArea.value);
+  const fMuda = selectEl(mudasAqui().map(m=>({label:nomeMuda(m),value:m.id})), pre.mudaId||"", "a linha inteira");
+  if(mudasAqui().length) w.appendChild(field("Em qual muda?", fMuda, "Deixe em branco se for a linha toda."));
+  w.appendChild(field("Qual é o problema?", fMal, "Se não estiver na lista, escreva abaixo."));
+  w.appendChild(field("Outro (escreva)", fNovo));
+  w.appendChild(field("Desde quando", fData));
+  w.appendChild(field("Observação", fObs));
+  openSheet("Registrar problema", w, [btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet()),
+    btn("Salvar","pri", async () => {
+      if(!fArea.value) return showErr(eb,"Escolha a área.");
+      if(!fMal.value && !fNovo.value.trim()) return showErr(eb,"Diga qual é o problema.");
+      const mal = fMal.value ? malById(fMal.value) : await garantirMal(fNovo.value.trim());
+      const p = await abrirProblema({malId: mal.id, areaId: fArea.value,
+        mudaId: (mudasAqui().length && fMuda.value) ? fMuda.value : null,
+        desdeEm: fData.value||todayISO(), obs: fObs.value.trim()});
+      const r={id:uid(),tipo:"problema",areaId:fArea.value,mudaId:p.mudaId,malId:mal.id,problemaId:p.id,
+               data:fData.value||todayISO(),hora:pre.hora||nowHM(),obs:fObs.value.trim(),
+               gravacaoId:pre.gravacaoId||null,criadoEm:new Date().toISOString()};
+      await salvarRegistro(r,pre); toast(mal.nome+" registrado");
+    })]);
+}
+
 function formColheita(pre){
   if(needAreas()) return; pre=pre||{};
   const eb=errBox(), w=el("div"); w.appendChild(eb);
@@ -1575,6 +1721,43 @@ async function criarMudas(areaId, especie, quantos, extra){
     feitas.push(m);
   }
   return feitas;
+}
+
+const idProblema = (onde, malId, desdeEm) =>
+  "prob-" + String(onde).replace(/^(area|muda)-/,"") + "-" + String(malId).replace(/^mal-/,"") + "-" + desdeEm;
+
+async function abrirProblema({malId, areaId, mudaId, desdeEm, obs}){
+  if(!malId || !areaId) return null;
+  const p = {id: idProblema(mudaId || areaId, malId, desdeEm || todayISO()),
+             malId, areaId, mudaId: mudaId || null, desdeEm: desdeEm || todayISO(),
+             status: "aberto", resolvidoEm: null, obs: obs || "", criadoEm: new Date().toISOString()};
+  await put("problemas", p);
+  const ix = S.problemas.findIndex(x => x.id === p.id);
+  if(ix >= 0) S.problemas[ix] = p; else S.problemas.push(p);
+  if(mudaId){
+    const m = mudaById(mudaId);
+    if(m && m.saude !== "problema"){ m.saude = "problema"; await put("mudas", m); }
+  }
+  return p;
+}
+
+async function fecharProblema(id, quando){
+  const p = S.problemas.find(x => x.id === id); if(!p) return null;
+  p.status = "resolvido"; p.resolvidoEm = quando || todayISO();
+  await put("problemas", p);
+  if(p.mudaId && !problemasDaMuda(p.mudaId).length){
+    const m = mudaById(p.mudaId);
+    if(m && m.saude === "problema"){ m.saude = "bem"; await put("mudas", m); }
+  }
+  return p;
+}
+
+async function reabrirProblema(id){
+  const p = S.problemas.find(x => x.id === id); if(!p) return null;
+  p.status = "aberto"; p.resolvidoEm = null;
+  await put("problemas", p);
+  if(p.mudaId){ const m = mudaById(p.mudaId); if(m){ m.saude = "problema"; await put("mudas", m); } }
+  return p;
 }
 
 /* ============ cadastros ============ */
@@ -1833,6 +2016,7 @@ function telaConfirmar(texto, drafts, g, previasFixas){
     else if(d.tipo === "poda") formPoda(pre);
     else if(d.tipo === "plantio") formPlantio(pre);
     else if(d.tipo === "colheita") formColheita(pre);
+    else if(d.tipo === "problema") formProblema(pre);
     else formObs(pre);
   }
 
@@ -1871,6 +2055,12 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       if(!d.areaId && d.tipo !== "observacao") faltas.push("não entendi a área");
       if(d.tipo === "insumo" && !d.insumoId) faltas.push("não entendi o produto");
       if(d.tipo === "plantio" && !d.cultura) faltas.push("falta a cultura");
+      if(d.tipo === "problema" && !d.malId && !d.malNovo) faltas.push("qual é o problema?");
+      if(d.malNovo && !d.malId) bd.appendChild(el("div","t2", "novo no seu dicionário: “" + esc(d.malNovo) + "”"));
+      if(d.fecharProblema && d.problemaId){
+        const pa = S.problemas.find(x => x.id === d.problemaId);
+        if(pa) bd.appendChild(el("div","t2", "fecha: " + esc(nomeDoMal(pa.malId) + " · " + ondeDoProblema(pa))));
+      }
       if(!d.mudaId && d.mudasCandidatas && d.mudasCandidatas.length) faltas.push("qual delas?");
       if(faltas.length) bd.appendChild(el("div","t2 falta", esc(faltas.join(" · "))));
       b.appendChild(bd);
@@ -2019,7 +2209,7 @@ function telaConfirmar(texto, drafts, g, previasFixas){
           const t = el("div"); t.style.padding = "0 14px 14px";
           t.appendChild(el("div","sec-t", "“" + w + "” quer dizer o quê?"));
           const l2 = el("div","chips");
-          ["irrigacao","insumo","poda","plantio","colheita"].forEach(tp => {
+          ["irrigacao","insumo","poda","plantio","colheita","problema","observacao"].forEach(tp => {
             const b2 = el("button","chip", esc(TIPO_LB[tp]));
             b2.onclick = async () => {
               await ensinarVerbo(escolhida, tp);
@@ -2052,6 +2242,7 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       if(d.tipo !== "observacao" && !d.areaId) return cobrar(ix, "Falta a área — toque num dos botões laranjas.");
       if(d.tipo === "insumo" && !d.insumoId) return cobrar(ix, "Falta o produto — toque num dos botões laranjas.");
       if(d.tipo === "plantio" && !d.cultura) return cobrar(ix, "Falta dizer o que foi plantado — toque em “editar”.");
+      if(d.tipo === "problema" && !d.malId && !d.malNovo) return cobrar(ix, "Falta dizer qual é o problema — toque em “editar”.");
       if(!d.mudaId && d.mudasCandidatas && d.mudasCandidatas.length)
         return cobrar(ix, "Tem mais de uma — toque na muda certa.");
     }
@@ -2068,6 +2259,9 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       if(r.regraDetectada){ r.obs = ((r.obs ? r.obs + " · " : "") + "combinado: " + r.regraDetectada); delete r.regraDetectada; }
       delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
       const saudeNova = r.saudeMuda; delete r.saudeMuda; delete r.mudasCandidatas; delete r.acaoId;
+      const abrirMal = r.malNovo; delete r.malNovo;
+      const fechaId = r.fecharProblema ? r.problemaId : null;
+      delete r.fecharProblema; delete r.problemasCandidatos;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
       const polida = corrigirFrase(texto);
       if(polida && polida !== texto) r.falaCorrigida = polida;
@@ -2075,6 +2269,16 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         const feitas = await criarMudas(r.areaId, r.cultura, r.quantidade || 1, {desdeEm: r.data});
         if(feitas.length === 1) r.mudaId = feitas[0].id;
       }
+      if(r.tipo === "problema" && !fechaId && (r.malId || abrirMal) && r.areaId){
+        const mal = r.malId ? malById(r.malId) : await garantirMal(abrirMal);
+        if(mal){
+          r.malId = mal.id;
+          const p = await abrirProblema({malId: mal.id, areaId: r.areaId, mudaId: r.mudaId || null,
+                                         desdeEm: r.data, obs: r.obs || ""});
+          if(p) r.problemaId = p.id;
+        }
+      }
+      if(fechaId){ await fecharProblema(fechaId, r.data); r.problemaId = fechaId; r.fecho = true; }
       if(saudeNova && r.mudaId){
         const m = mudaById(r.mudaId);
         if(m && m.saude !== saudeNova){ m.saude = saudeNova; await put("mudas", m); }
@@ -2259,6 +2463,7 @@ function escolherTipo(pre){
   c.appendChild(it("&#9986;","Poda",()=>formPoda(pre)));
   c.appendChild(it("&#127793;","Plantio",()=>formPlantio(pre)));
   c.appendChild(it("&#127807;","Colheita",()=>formColheita(pre)));
+  c.appendChild(it("&#129440;","Problema",()=>formProblema(pre)));
   c.appendChild(it("&#128221;","Observação",()=>formObs(pre)));
   w.appendChild(c);
   openSheet("O que foi isso?",w,[btn("Cancelar","sec",()=>pre&&pre.aoCancelar?pre.aoCancelar():closeSheet())]);
@@ -2338,6 +2543,7 @@ function verRegistro(r){
     if(i&&i.carencia) kv("Colher a partir de",fmtDay(new Date(dayStart(r.data)+i.carencia*MS_DAY).toISOString().slice(0,10))); }
   if(r.tipo==="plantio"){ kv("Cultura",r.cultura); kv("Variedade",r.variedade); kv("Quantidade",r.quantidade); }
   if(r.tipo==="colheita"){ kv("Quantidade",r.quantidade?fmtNum(r.quantidade)+" "+(r.unidade||""):null); }
+  if(r.malId){ kv("Problema",nomeDoMal(r.malId)); if(r.fecho) kv("Situação","resolvido"); }
   kv("Observação",r.obs);
   /* vale também pros registros antigos: a correção é calculada na hora */
   const polida = r.falaCorrigida || (r.fala ? corrigirFrase(r.fala) : "");
@@ -2385,6 +2591,9 @@ function cardArea(a){
   const ms=faixaMudas(a.id);
   if(ms) bd.appendChild(ms);
   else bd.appendChild(el("div","mt", esc(a.tipo || "sem mudas cadastradas")));
+  const probs=problemasDaArea(a.id);
+  if(probs.length && !parada)
+    bd.appendChild(el("div","probchip", "⚠ " + esc(probs.map(x=>nomeDoMal(x.malId)).join(", "))));
   b.appendChild(bd);
   if(parada){
     b.appendChild(el("div","pill neutral","parada"));
@@ -2435,6 +2644,20 @@ function screenAreaDetalhe(id){
       render(); toast(a.situacao==="parada"?"Área parada":"Área ativa de novo");
     });
   tg.style.flex="1"; sw.appendChild(tg); v.appendChild(sw);
+
+  const probs=problemasDaArea(a.id);
+  if(probs.length){
+    const sp=el("div","sec"); sp.appendChild(el("div","sec-t","Problemas abertos"));
+    const cp=el("div","card");
+    probs.forEach(pr=>{
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(nomeDoMal(pr.malId))));
+      bd.appendChild(el("div","mt",esc((pr.mudaId?nomeMuda(mudaById(pr.mudaId))+" · ":"")+"desde "+fmtDay(pr.desdeEm))));
+      b.appendChild(bd); b.appendChild(el("div","pill bad","há "+daysAgo(pr.desdeEm)+"d"));
+      b.onclick=()=>verProblema(pr); cp.appendChild(b);
+    });
+    sp.appendChild(cp); v.appendChild(sp);
+  }
 
   const ms=mudasDaArea(a.id);
   const sm=el("div","sec"); sm.appendChild(el("div","sec-t","Mudas nesta linha"));
@@ -2494,6 +2717,20 @@ function screenMuda(id){
   if(m.obs) kv("Observação",m.obs);
   v.appendChild(hd);
 
+  const pm=problemasDaMuda(m.id);
+  if(pm.length){
+    const sp=el("div","sec"); sp.appendChild(el("div","sec-t","Problemas abertos"));
+    const cp=el("div","card");
+    pm.forEach(pr=>{
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(nomeDoMal(pr.malId))));
+      bd.appendChild(el("div","mt",esc("desde "+fmtDay(pr.desdeEm))));
+      b.appendChild(bd); b.appendChild(el("div","pill bad","há "+daysAgo(pr.desdeEm)+"d"));
+      b.onclick=()=>verProblema(pr); cp.appendChild(b);
+    });
+    sp.appendChild(cp); v.appendChild(sp);
+  }
+
   const sc=el("div","sec"); sc.appendChild(el("div","sec-t","Como ela está"));
   const chips=el("div","chips"); chips.style.marginBottom="6px";
   SAUDES.forEach(s=>{
@@ -2528,7 +2765,7 @@ function formVerbo(existing){
   const a = existing || {};
   const eb = errBox(), w = el("div"); w.appendChild(eb);
   const fPal = input("text", palavraDaAcao(a) || "", "ex: cortei, transplantei, borrifei");
-  const TIPOS = ["irrigacao","insumo","poda","plantio","colheita","observacao"];
+  const TIPOS = ["irrigacao","insumo","poda","plantio","colheita","problema","observacao"];
   const fTipo = chipGroup(TIPOS.map(t => TIPO_LB[t]), a.tipo ? TIPO_LB[a.tipo] : null);
   const fOuv = input("text", (a.ouvidos || []).join(", "), "ex: cortar, cortou");
   w.appendChild(field("A palavra", fPal, "Do jeito que você fala: “cortei”, não “cortar”."));
@@ -2565,7 +2802,7 @@ function screenVerbos(){
     "Se você fala de um jeito que não está aqui, acrescente — ou fale e use o “Ensinar” na tela de conferência.";
   v.appendChild(info);
 
-  ["irrigacao","insumo","poda","plantio","colheita","observacao"].forEach(tp => {
+  ["irrigacao","insumo","poda","plantio","colheita","problema","observacao"].forEach(tp => {
     const arr = listaAcoes().filter(a => a.tipo === tp);
     if(!arr.length) return;
     const s=el("div","sec"); s.appendChild(el("div","sec-t", TIPO_LB[tp]));
@@ -2629,7 +2866,25 @@ function screenAgenda(){
 
   const lista = tarefas();
 
-  if(!lista.length){
+  const abertos = problemasAbertos().sort((a,b) => a.desdeEm.localeCompare(b.desdeEm));
+  if(abertos.length){
+    const sec = el("div","sec");
+    sec.appendChild(el("div","sec-t","Problemas abertos"));
+    const c = el("div","card");
+    abertos.forEach(p => {
+      const b = el("button","acard");
+      const bd = el("div","bd");
+      bd.appendChild(el("div","nm", esc(nomeDoMal(p.malId))));
+      bd.appendChild(el("div","mt", esc(ondeDoProblema(p) + " · desde " + fmtDay(p.desdeEm))));
+      b.appendChild(bd);
+      b.appendChild(el("div","pill bad", "há " + daysAgo(p.desdeEm) + "d"));
+      b.onclick = () => verProblema(p);
+      c.appendChild(b);
+    });
+    sec.appendChild(c); v.appendChild(sec);
+  }
+
+  if(!lista.length && !abertos.length){
     const e = el("div","empty"); e.style.textAlign = "left";
     e.innerHTML = "<b>Nenhum combinado ainda.</b><br><br>Fale, por exemplo: <i>“apliquei neem na estufa 1 a cada 7 dias”</i>. " +
       "A partir daí eu passo a te cobrar, e a data anda sozinha toda vez que você registrar a aplicação.";
@@ -2658,6 +2913,7 @@ function screenAgenda(){
     v.appendChild(sec);
   };
 
+  if(!lista.length) return;
   bloco("Atrasado", lista.filter(t => t.atraso > 0));
   bloco("Vence hoje", lista.filter(t => t.atraso === 0));
   bloco("Vem por aí", lista.filter(t => t.atraso < 0));
@@ -2667,6 +2923,113 @@ function screenAgenda(){
   nota.innerHTML = "A data anda sozinha: registre a aplicação e o combinado se resolve. " +
     "O aviso no celular ainda não existe — por enquanto você vê aqui e na plantinha da tela inicial.";
   v.appendChild(nota);
+}
+
+function verProblema(p){
+  const w = el("div");
+  const c = el("div","card"); c.style.padding = "4px 16px";
+  const kv = (k, val) => { if(val == null || val === "") return; const d = el("div","kv");
+    d.appendChild(el("span",null,esc(k))); d.appendChild(el("span",null,esc(val))); c.appendChild(d); };
+  kv("O quê", nomeDoMal(p.malId));
+  kv("Tipo", (malById(p.malId)||{}).tipo);
+  kv("Onde", ondeDoProblema(p));
+  kv("Desde", fmtDay(p.desdeEm) + " (" + daysAgo(p.desdeEm) + " dias)");
+  kv("Situação", p.status === "resolvido" ? "resolvido em " + fmtDay(p.resolvidoEm) : "aberto");
+  if(p.status === "resolvido" && p.resolvidoEm)
+    kv("Durou", Math.max(0, Math.round((dayStart(p.resolvidoEm) - dayStart(p.desdeEm))/MS_DAY)) + " dias");
+  kv("Observação", p.obs);
+  w.appendChild(c);
+
+  const ligados = S.registros.filter(r => r.problemaId === p.id || (r.malId === p.malId && r.areaId === p.areaId && r.data >= p.desdeEm))
+    .sort((x,y) => (y.data+(y.hora||"")).localeCompare(x.data+(x.hora||"")));
+  if(ligados.length){
+    const s = el("div","sec"); s.style.marginTop = "16px";
+    s.appendChild(el("div","sec-t","O que aconteceu desde então"));
+    s.appendChild(grouped(ligados, false));
+    w.appendChild(s);
+  }
+
+  const foot = [btn("Fechar","sec",closeSheet)];
+  foot.push(p.status === "resolvido"
+    ? btn("Reabrir","pri", async () => { await reabrirProblema(p.id); closeSheet(); render(); toast("Problema reaberto"); })
+    : btn("Resolvido","pri", async () => { await fecharProblema(p.id); closeSheet(); render(); toast(nomeDoMal(p.malId) + " resolvido"); }));
+  openSheet(nomeDoMal(p.malId), w, foot);
+}
+
+function screenProblemas(){
+  head("Problemas",""); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  const abertos=S.problemas.filter(p=>p.status!=="resolvido");
+  const fim=S.problemas.filter(p=>p.status==="resolvido");
+  if(!S.problemas.length){
+    const e=el("div","empty"); e.style.textAlign="left";
+    e.innerHTML="<b>Nenhum problema registrado.</b><br><br>Fale <i>“diagnostiquei fundo preto na linha do tomate”</i> — "+
+      "ele fica aberto e te cobrando até você dizer <i>“o fundo preto passou”</i>.";
+    v.appendChild(e);
+  }
+  const bloco=(titulo,arr)=>{
+    if(!arr.length) return;
+    const s=el("div","sec"); s.appendChild(el("div","sec-t",titulo)); const c=el("div","card");
+    arr.slice().sort((a,b)=>b.desdeEm.localeCompare(a.desdeEm)).forEach(p=>{
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(nomeDoMal(p.malId))));
+      bd.appendChild(el("div","mt",esc(ondeDoProblema(p)+" · desde "+fmtDay(p.desdeEm))));
+      b.appendChild(bd);
+      b.appendChild(el("div","pill "+(p.status==="resolvido"?"ok":"bad"),
+        p.status==="resolvido"?"resolvido":"há "+daysAgo(p.desdeEm)+"d"));
+      b.onclick=()=>verProblema(p); c.appendChild(b);
+    });
+    s.appendChild(c); v.appendChild(s);
+  };
+  bloco("Abertos",abertos); bloco("Resolvidos",fim);
+
+  const nb=btn("+ Registrar problema","pri",()=>formProblema({})); nb.style.marginTop="16px"; v.appendChild(nb);
+  const db=btn("Doenças e pragas que ele conhece","sec",()=>screenMales()); db.style.marginTop="10px"; db.style.flex="1"; v.appendChild(db);
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
+}
+
+function formMal(existing){
+  const m=existing||{};
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fNome=input("text",m.nome||"","ex: fundo preto");
+  const fTipo=chipGroup(TIPOS_MAL,m.tipo||null);
+  const fApel=input("text",(m.apelidos||[]).join(", "),"como você fala, e o que o celular ouve errado");
+  w.appendChild(field("Nome",fNome)); w.appendChild(field("Tipo",fTipo));
+  w.appendChild(field("Outras formas",fApel,"Separe por vírgula."));
+  const foot=[btn("Cancelar","sec",closeSheet),btn("Salvar","pri",async()=>{
+    if(!fNome.value.trim()) return showErr(eb,"Dê um nome.");
+    const o={id:m.id||idMal(fNome.value.trim()),nome:fNome.value.trim(),tipo:fTipo.value()||"Outro",
+             apelidos:fApel.value.split(",").map(s=>s.trim()).filter(Boolean),
+             criadoEm:m.criadoEm||new Date().toISOString()};
+    await put("males",o);
+    const ix=S.males.findIndex(x=>x.id===o.id); if(ix>=0)S.males[ix]=o; else S.males.push(o);
+    closeSheet(); screenMales(); toast(existing?"Atualizado":"Cadastrado");
+  })];
+  if(existing) foot.unshift(btn("Excluir","dng",()=>confirmDel("Excluir \""+m.nome+"\"?","Os problemas já registrados continuam no histórico.",async()=>{
+    await del("males",m.id); S.males=S.males.filter(x=>x.id!==m.id); closeSheet(); screenMales(); toast("Excluído");
+  })));
+  openSheet(existing?"Editar":"Nova doença ou praga",w,foot);
+}
+
+function screenMales(){
+  head("Doenças e pragas","o que o app reconhece quando você fala"); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  TIPOS_MAL.forEach(tp=>{
+    const arr=S.males.filter(m=>(m.tipo||"Outro")===tp);
+    if(!arr.length) return;
+    const s=el("div","sec"); s.appendChild(el("div","sec-t",tp)); const c=el("div","card");
+    arr.forEach(m=>{
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(m.nome)));
+      bd.appendChild(el("div","mt",esc((m.apelidos||[]).join(", ")||"—")));
+      b.appendChild(bd);
+      b.appendChild(el("div","pill neutral",S.problemas.filter(p=>p.malId===m.id).length+"×"));
+      b.onclick=()=>formMal(m); c.appendChild(b);
+    });
+    s.appendChild(c); v.appendChild(s);
+  });
+  const b=btn("+ Nova doença ou praga","pri",()=>formMal()); b.style.marginTop="16px"; v.appendChild(b);
+  const vt=btn("← Voltar","sec",screenProblemas); vt.style.marginTop="10px"; vt.style.flex="1"; v.appendChild(vt);
 }
 
 function verRegra(reg){
@@ -2764,6 +3127,7 @@ function screenMais(){
   c.appendChild(item("&#129524;","Produtos",S.insumos.length+"",screenInsumos));
   c.appendChild(item("&#127793;","Mudas",S.mudas.length+"",screenMudas));
   c.appendChild(item("&#128172;","Verbos",listaAcoes().length+"",screenVerbos));
+  c.appendChild(item("&#129440;","Problemas",problemasAbertos().length+" abertos",screenProblemas));
   v.appendChild(c);
 
   const c2=el("div","card"); c2.style.marginTop="18px";
@@ -2785,6 +3149,7 @@ function screenMais(){
     const c = await canonizarIds();
     await instalarVocabulario();
     await instalarAcoes();
+    await instalarMales();
     const o = await repararOrfaos();
     await load(); render();
     toast("Juntei "+j+", arrumei "+c+" e reconectei "+o+" registro(s)");
@@ -3021,7 +3386,7 @@ function screenSincronia(){
 function semBlobs(r){ const o=Object.assign({},r); delete o.foto; return o; }
 function exportar(){
   const data={versao:4,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
-              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,regras:S.regras,
+              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,males:S.males,problemas:S.problemas,regras:S.regras,
               registros:S.registros.map(semBlobs),config:S.config};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a");
@@ -3037,7 +3402,7 @@ function importar(){
     try{
       const d=JSON.parse(await file.text());
       if(!d||!Array.isArray(d.registros)) throw new Error("formato");
-      for(const s of ["areas","insumos","plantios","mudas","acoes","regras","registros"]){
+      for(const s of ["areas","insumos","plantios","mudas","acoes","males","problemas","regras","registros"]){
         await clearStore(s); for(const o of (d[s]||[])) await put(s,o);
       }
       if(d.config) await put("config",Object.assign({id:"app"},d.config));
@@ -3111,6 +3476,7 @@ async function exemplos(){
       await migrarFrequencias();
       await migrarSituacaoDasAreas();
       await instalarAcoes();
+      await instalarMales();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
@@ -3126,7 +3492,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
