@@ -35,6 +35,14 @@ input,select,textarea{font:inherit;color:inherit;width:100%}
 .d-problema{background:#C4452F}
 .chip.no{border-color:#E0B4AC;background:#FCF1EF;color:#8C2F22}
 .chip.si{border-color:#B7D9BF;background:#F0F7F1;color:#1F4C2C}
+.bloco{border:1px solid var(--line);border-radius:12px;margin-bottom:8px;overflow:hidden;background:var(--card)}
+.bloco>button{width:100%;display:flex;align-items:center;gap:8px;padding:11px 13px;background:none;border:0;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.bloco .bn{flex:1;font-weight:600;font-size:14.5px}
+.bloco .bm{font-size:12px;color:var(--ink2)}
+.bloco.agora{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
+.bloco.agora .bn{color:var(--green-d)}
+.bloco .bt{padding:0 13px 13px;white-space:pre-wrap;line-height:1.55;font-size:14px}
+.agorapill{background:var(--green);color:#fff;border-radius:20px;padding:2px 9px;font-size:11.5px;font-weight:700}
 .rsm h3{margin:22px 0 6px;font-size:17px}
 .rsm .lead{color:var(--ink2);line-height:1.55;margin:0 0 10px}
 .rsm .tab{width:100%;border-collapse:collapse;margin:8px 0 4px}
@@ -252,8 +260,8 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=7;
-const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","registros","regras","gravacoes","pendentes","config"];
+const DB_NAME="caderno-campo", DB_VER=8;
+const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","planos","registros","regras","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -268,8 +276,8 @@ function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"r
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* o que viaja pra nuvem */
-const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", males:"mal", problemas:"problema", registros:"registro", regras:"regra"};
-const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", mal:"males", problema:"problemas", registro:"registros", regra:"regras"};
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", males:"mal", problemas:"problema", planos:"plano", registros:"registro", regras:"regra"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", mal:"males", problema:"problemas", plano:"planos", registro:"registros", regra:"regras"};
 
 async function marcarPendente(loja, id, apagado, quando){
   const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
@@ -297,12 +305,12 @@ function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly")
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], males:[], problemas:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], males:[], problemas:[], planos:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
 /* por nome, não por posição: acrescentar uma loja não pode embaralhar o estado */
 async function load(){
   const res = await Promise.all(STORES.map(all));
   const por = {}; STORES.forEach((s,i) => por[s] = res[i] || []);
-  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes; S.males=por.males; S.problemas=por.problemas;
+  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes; S.males=por.males; S.problemas=por.problemas; S.planos=por.planos;
   S.registros=por.registros; S.regras=por.regras; S.gravacoes=por.gravacoes; S.pendentes=por.pendentes;
   S.config = (por.config.find(x=>x.id==="app")||{id:"app"});
 }
@@ -349,11 +357,100 @@ const ondeDoProblema = p => {
   return (m ? nomeMuda(m) + " · " : "") + (a ? a.nome : "");
 };
 
-/* ---- ficha da muda ----
-   O que a planta gosta e o que faz mal a ela. Não é tarefa: é o que você sabe
-   sobre aquela planta e não quer esquecer na hora de aplicar alguma coisa. */
-const temPlano = m => !!(m && ((m.gosta||[]).length || (m.evita||[]).length || (m.plano||"").trim()));
+/* ---- plano de trabalho ----
+   O plano é da ESPÉCIE, não do pé: o que vale para uma jaboticaba vale para as onze.
+   E tem época: o que é proibido na seca pode ser permitido nas chuvas. Por isso o
+   plano é um texto só, e os blocos nascem dos títulos que você mesmo escreve —
+   qualquer linha com meses entre parênteses vira um bloco. */
+const idPlano = especie => idCanonico("plano", especie);
+const planoDaEspecie = especie => S.planos.find(p => normalizarFala(p.especie) === normalizarFala(especie));
+const mudasDaEspecie = especie => S.mudas.filter(m => normalizarFala(m.especie) === normalizarFala(especie));
 const listaLimpa = arr => [...new Set((arr||[]).map(x => String(x||"").trim()).filter(x => x.length >= 2))];
+
+/* "(maio–setembro)" -> [5,6,7,8,9] · "(novembro–março)" atravessa o ano */
+function mesesDoTitulo(linha){
+  const dentro = (String(linha).match(/\(([^)]*)\)/) || [null, ""])[1];
+  const nomes = Object.keys(MESES);
+  const achados = semAcento(dentro).split(/[^a-z]+/).filter(Boolean)
+    .map(w => nomes.find(k => parecido(w, k) >= 0.85)).filter(Boolean);
+  if(achados.length < 2) return null;
+  const a = MESES[achados[0]], b = MESES[achados[achados.length - 1]];
+  const out = []; let cur = a;
+  for(let i = 0; i < 12; i++){ out.push(cur); if(cur === b) break; cur = cur % 12 + 1; }
+  return out;
+}
+
+function blocosDoPlano(texto){
+  const linhas = String(texto || "").split("\n");
+  const blocos = []; const geral = []; let atual = null;
+  linhas.forEach(l => {
+    const meses = l.indexOf("(") >= 0 ? mesesDoTitulo(l) : null;
+    if(meses && meses.length >= 2){
+      atual = {titulo: l.trim(),
+               nome: (l.split("(")[0] || l).replace(/[—–\-]+\s*$/, "").trim() || l.trim(),
+               meses, linhas: []};
+      blocos.push(atual);
+    } else if(atual) atual.linhas.push(l);
+    else geral.push(l);
+  });
+  blocos.forEach(b => b.texto = b.linhas.join("\n").trim());
+  return {geral: geral.join("\n").trim(), blocos};
+}
+
+function blocoDeHoje(B, mes){
+  const m = mes || (new Date().getMonth() + 1);
+  return (B.blocos || []).find(b => b.meses.indexOf(m) >= 0) || null;
+}
+
+async function salvarPlano(especie, texto){
+  const nome = capitalizar(singular(String(especie || "").trim()));
+  if(!nome) return null;
+  const ja = planoDaEspecie(nome);
+  const p = Object.assign({id: idPlano(nome), especie: nome, criadoEm: new Date().toISOString()},
+                          ja || {}, {texto: String(texto || ""), planoEm: todayISO()});
+  await put("planos", p);
+  const ix = S.planos.findIndex(x => x.id === p.id);
+  if(ix >= 0) S.planos[ix] = p; else S.planos.push(p);
+  return p;
+}
+
+async function acrescentarAoPlano(especie, linha){
+  const ja = planoDaEspecie(especie);
+  const antes = ja ? ja.texto : "";
+  if(normalizarFala(antes).indexOf(normalizarFala(linha)) >= 0) return ja;
+  return salvarPlano(especie, (antes ? antes.replace(/\s*$/, "") + "\n" : "") + linha);
+}
+
+/* frases do plano que PROÍBEM alguma coisa */
+const NEGA_RE = /\b(nada de|sem |nao usar|nao use|nao aplicar|nao aplique|evitar|evite|proibid|nao pode|nao deve|suspend|nunca)/;
+
+/* o produto que você vai aplicar está proibido no bloco desta época? */
+function avisosDoPlano(d, mes){
+  if(!d || !d.insumoId) return [];
+  const ins = insumoById(d.insumoId); if(!ins) return [];
+  const alvos = d.mudaId ? [mudaById(d.mudaId)] : (d.areaId ? mudasDaArea(d.areaId) : []);
+  const vistos = [], fora = [];
+  alvos.filter(Boolean).forEach(m => {
+    const pl = planoDaEspecie(m.especie);
+    if(!pl || vistos.indexOf(pl.id) >= 0) return;
+    vistos.push(pl.id);
+    const B = blocosDoPlano(pl.texto);
+    const agora = blocoDeHoje(B, mes);
+    const fontes = [{tx: B.geral, bloco: null}];
+    if(agora) fontes.push({tx: agora.texto, bloco: agora.nome});
+    fontes.forEach(f => {
+      String(f.tx || "").split(/[\n.;]/).forEach(linha => {
+        const n = normalizarFala(linha);
+        if(!NEGA_RE.test(n)) return;
+        if(n.indexOf(normalizarFala(ins.nome)) < 0) return;
+        fora.push({especie: pl.especie, bloco: f.bloco, frase: linha.trim()});
+      });
+    });
+  });
+  return fora;
+}
+
+const temPlano = m => !!(m && planoDaEspecie(m.especie));
 
 /* o nome do produto encosta em alguma coisa da lista? */
 function bateCom(nome, item){
@@ -363,32 +460,6 @@ function bateCom(nome, item){
   if(b.length >= 4 && a.indexOf(b) >= 0) return true;
   if(a.length >= 4 && b.indexOf(a) >= 0) return true;
   return parecido(a, b) >= 0.82;
-}
-
-/* devolve os avisos de "essa planta não gosta disso" */
-function avisosDoPlano(d){
-  if(!d || !d.insumoId) return [];
-  const ins = insumoById(d.insumoId); if(!ins) return [];
-  const alvos = d.mudaId ? [mudaById(d.mudaId)] : (d.areaId ? mudasDaArea(d.areaId) : []);
-  const fora = [];
-  alvos.filter(Boolean).forEach(m => {
-    (m.evita || []).forEach(x => {
-      if(bateCom(ins.nome, x)) fora.push(nomeMuda(m) + " não gosta de " + x);
-    });
-  });
-  return [...new Set(fora)];
-}
-
-async function aplicarPlano(mudaId, patch){
-  const m = mudaById(mudaId); if(!m || !patch) return null;
-  if(patch.gosta) m.gosta = listaLimpa((m.gosta||[]).concat(patch.gosta));
-  if(patch.evita) m.evita = listaLimpa((m.evita||[]).concat(patch.evita));
-  if(patch.plano != null) m.plano = patch.plano;
-  m.planoEm = todayISO();
-  await put("mudas", m);
-  const ix = S.mudas.findIndex(x => x.id === m.id);
-  if(ix >= 0) S.mudas[ix] = m;
-  return m;
 }
 
 /* ---- situação da área ---- */
@@ -726,8 +797,8 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "12 · resumo";
-const VOCAB_VERSAO = 7;
+const APP_VERSAO = "13 · plano da espécie";
+const VOCAB_VERSAO = 8;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
   {nome:"Linha direita",     tipo:"Linha", apelidos:["linha da direita","direita","linda direita","lima direita","linha direto"]},
@@ -917,6 +988,30 @@ async function migrarSituacaoDasAreas(){
     await put("areas", a); n++;
   }
   return n;
+}
+
+/* O plano morava em cada muda, com listas de gosta/não gosta ao lado.
+   Passa a morar na espécie, num texto só. Nada se perde: as listas viram linhas. */
+async function migrarPlanosParaEspecie(){
+  let movidos = 0;
+  for(const m of S.mudas){
+    const partes = [];
+    if((m.plano || "").trim()) partes.push(m.plano.trim());
+    if((m.gosta || []).length) partes.push("Gosta: " + m.gosta.join(", "));
+    if((m.evita || []).length) partes.push("Evitar: " + m.evita.join(", "));
+    if(partes.length){
+      const ja = planoDaEspecie(m.especie);
+      const antes = ja ? ja.texto : "";
+      const novo = partes.filter(x => normalizarFala(antes).indexOf(normalizarFala(x)) < 0).join("\n\n");
+      if(novo) await salvarPlano(m.especie, antes ? antes + "\n\n" + novo : novo);
+      movidos++;
+    }
+    if(m.plano != null || m.gosta || m.evita || m.planoEm){
+      delete m.plano; delete m.gosta; delete m.evita; delete m.planoEm;
+      await put("mudas", m);
+    }
+  }
+  return movidos;
 }
 
 async function instalarVocabulario(){
@@ -1461,19 +1556,17 @@ function interpretar(falaOriginal, ctx){
           const itens = String(alvo[1]).split(/\s*(?:,| e )\s*/)
             .map(s => s.trim()).filter(s => s.length >= 3 && !PALAVRA_BOBA.test(s)).slice(0, 6);
           if(itens.length){
-            d.planoMuda = neg ? {evita: itens} : {gosta: itens};
-            d.tipo = "observacao";
-            delete d.saudeMuda;          /* "gosta" não é diagnóstico de saúde */
-            /* "nao gosta de cinza" cita o produto, mas não aplicou nada */
-            delete d.insumoId; delete d.unidade; delete d.quantidade; delete d.forma;
-
-            /* Ficha é o que se sabe da ESPÉCIE. Disse "a jaca", sem número?
-               Vale para todas as jacas. Disse "a jaca 2"? Só para ela. */
-            if(d.mudaId){
-              d.planoMudas = [d.mudaId];
-            } else if(d.mudasCandidatas && d.mudasCandidatas.length){
-              d.planoMudas = d.mudasCandidatas.slice();
-              delete d.mudasCandidatas;   /* não precisa escolher: é para todas */
+            const ref = d.mudaId ? mudaById(d.mudaId)
+                      : ((d.mudasCandidatas || []).length ? mudaById(d.mudasCandidatas[0]) : null);
+            if(ref){
+              /* o plano é da espécie: não importa de qual pé você falou */
+              d.planoEspecie = ref.especie;
+              d.planoLinha = (neg ? "Evitar: " : "Gosta: ") + itens.join(", ");
+              d.tipo = "observacao";
+              delete d.saudeMuda;        /* "gosta" não é diagnóstico de saúde */
+              delete d.mudasCandidatas;  /* não precisa escolher: vale para a espécie */
+              /* "nao gosta de cinza" cita o produto, mas não aplicou nada */
+              delete d.insumoId; delete d.unidade; delete d.quantidade; delete d.forma;
             }
           }
         }
@@ -2421,41 +2514,26 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         c.appendChild(bloco);
       }
 
-      /* aviso: essa planta não gosta disso */
+      /* aviso: o plano desta época proíbe esse produto */
       const avisos = avisosDoPlano(d);
       if(avisos.length){
         const av = el("div","avisoplano");
-        av.textContent = "⚠ " + avisos.join(" · ") + ". Está no plano de trabalho dela.";
+        av.textContent = "⚠ " + avisos.map(x => "“" + x.frase + "”" +
+          (x.bloco ? " — plano de " + x.especie + ", bloco " + x.bloco : " — plano de " + x.especie)).join(" · ");
         c.appendChild(av);
       }
 
-      /* mudança na ficha: mostra o que entra e em quais mudas */
-      if(d.planoMuda && (d.planoMudas || []).length){
+      /* linha nova no plano da espécie */
+      if(d.planoEspecie && d.planoLinha){
+        const quantas = mudasDaEspecie(d.planoEspecie).length;
         const bl = el("div"); bl.style.padding = "0 14px 12px";
-        const quais = d.planoMuda.evita || d.planoMuda.gosta || [];
-        const todas = (d._planoTodas || d.planoMudas).slice();
-        d._planoTodas = todas;
-        bl.appendChild(el("div","t2", "Plano · acrescentar em " +
-          (d.planoMuda.evita ? "“Não gosta”" : "“Gosta”") + ":"));
-        const ch = el("div","chips"); ch.style.margin = "6px 0 10px";
-        quais.forEach(x => ch.appendChild(el("span","chip " + (d.planoMuda.evita ? "no" : "si"), esc(x))));
-        bl.appendChild(ch);
-
-        bl.appendChild(el("div","t2", todas.length > 1
-          ? "Vale para estas " + todas.length + " — toque para tirar alguma:"
-          : "Vale para:"));
-        const cm = el("div","chips"); cm.style.marginTop = "6px";
-        todas.forEach(id => {
-          const mm = mudaById(id); if(!mm) return;
-          const dentro = d.planoMudas.indexOf(id) >= 0;
-          const b2 = el("button","chip" + (dentro ? " on" : ""), esc(nomeMuda(mm)));
-          b2.onclick = () => {
-            d.planoMudas = dentro ? d.planoMudas.filter(x => x !== id) : d.planoMudas.concat(id);
-            desenhar();
-          };
-          cm.appendChild(b2);
-        });
-        bl.appendChild(cm);
+        bl.appendChild(el("div","t2", "Plano de " + d.planoEspecie + " · acrescentar:"));
+        const li = el("div"); li.style.cssText = "margin:6px 0 8px;font-weight:600;line-height:1.5";
+        li.textContent = d.planoLinha;
+        bl.appendChild(li);
+        bl.appendChild(el("div","t2", quantas > 1
+          ? "Vale para as " + quantas + " mudas de " + d.planoEspecie + "."
+          : "Vale para toda " + d.planoEspecie + "."));
         c.appendChild(bl);
       }
 
@@ -2616,8 +2694,8 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
       const saudeNova = r.saudeMuda; delete r.saudeMuda; delete r.mudasCandidatas; delete r.acaoId;
       const abrirMal = r.malNovo; delete r.malNovo;
-      const planoNovo = r.planoMuda; delete r.planoMuda;
-      const planoAlvos = (r.planoMudas || []).slice(); delete r.planoMudas;
+      const planoEsp = r.planoEspecie, planoLin = r.planoLinha;
+      delete r.planoEspecie; delete r.planoLinha;
       const fechaId = r.fecharProblema ? r.problemaId : null;
       delete r.fecharProblema; delete r.problemasCandidatos;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
@@ -2637,8 +2715,7 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         }
       }
       if(fechaId){ await fecharProblema(fechaId, r.data); r.problemaId = fechaId; r.fecho = true; }
-      if(planoNovo && planoAlvos.length)
-        for(const alvo of planoAlvos) await aplicarPlano(alvo, planoNovo);
+      if(planoEsp && planoLin) await acrescentarAoPlano(planoEsp, planoLin);
       if(saudeNova && r.mudaId){
         const m = mudaById(r.mudaId);
         if(m && m.saude !== saudeNova){ m.saude = saudeNova; await put("mudas", m); }
@@ -3092,31 +3169,15 @@ function screenMuda(id){
     sp.appendChild(cp); v.appendChild(sp);
   }
 
-  const sp2=el("div","sec"); sp2.appendChild(el("div","sec-t","Plano de trabalho"));
-  const cp2=el("div","card"); cp2.style.padding="14px 16px";
-  const bloco=(titulo, arr, cls)=>{
-    if(!arr || !arr.length) return;
-    cp2.appendChild(el("div","t2", titulo));
-    const ch=el("div","chips"); ch.style.margin="6px 0 12px";
-    arr.forEach(x=>{ const c=el("span","chip "+cls, esc(x)); c.style.cursor="default"; ch.appendChild(c); });
-    cp2.appendChild(ch);
-  };
-  bloco("Gosta / precisa", m.gosta, "si");
-  bloco("Não gosta / evitar", m.evita, "no");
-  if((m.plano||"").trim()){
-    cp2.appendChild(el("div","t2","Anotações"));
-    const tx=el("div"); tx.style.cssText="white-space:pre-wrap;margin-top:5px;line-height:1.5";
-    tx.textContent=m.plano; cp2.appendChild(tx);
-  }
-  if(!temPlano(m)){
-    const vazio=el("div"); vazio.style.cssText="color:var(--ink2);line-height:1.5";
-    vazio.textContent="Nada anotado ainda. Escreva o que esta planta gosta e o que faz mal a ela — ou fale: “a "+
-      m.especie.toLowerCase()+" "+(m.numero||1)+" não gosta de cinza”.";
-    cp2.appendChild(vazio);
-  }
-  if(m.planoEm) cp2.appendChild(el("div","t2","atualizado em "+fmtDay(m.planoEm)));
-  sp2.appendChild(cp2);
-  const pb=btn(temPlano(m)?"Editar plano":"Escrever o plano","sec",()=>formPlano(m));
+  const irmas = mudasDaEspecie(m.especie).length;
+  const sp2=el("div","sec");
+  sp2.appendChild(el("div","sec-t","Plano de trabalho · " + m.especie));
+  const nota=el("div","t2"); nota.style.marginBottom="8px";
+  nota.textContent = irmas > 1 ? "Vale para as " + irmas + " mudas de " + m.especie + "." : "Vale para toda " + m.especie + ".";
+  sp2.appendChild(nota);
+  sp2.appendChild(caixaDePlano(m.especie));
+  const pb=btn(temPlano(m)?"Editar o plano de "+m.especie:"Escrever o plano de "+m.especie,"sec",
+    ()=>formPlano(m.especie, irmas));
   pb.style.marginTop="10px"; pb.style.flex="1"; sp2.appendChild(pb);
   v.appendChild(sp2);
 
@@ -3182,30 +3243,95 @@ function formVerbo(existing){
   openSheet(existing ? "Editar verbo" : "Novo verbo", w, foot);
 }
 
-function formPlano(m){
-  if(!m) return;
+const MODELO_PLANO =
+"SECA (maio–setembro)\n" +
+"O que fazer nesta época. Ex: irrigação regular, mulch grosso. Nada de cinza nessa fase.\n\n" +
+"CHUVAS (novembro–março)\n" +
+"O que muda quando chove. Ex: chorume 1:10 a cada 15 dias.\n";
+
+function formPlano(especie, quantas){
+  const pl = planoDaEspecie(especie);
   const eb=errBox(), w=el("div"); w.appendChild(eb);
-  const fG=textarea((m.gosta||[]).join("\n"), "um por linha\nex: nitrogênio\ncálcio\nmeia-sombra");
-  const fE=textarea((m.evita||[]).join("\n"), "um por linha\nex: cinza\nfósforo em excesso");
-  const fN=textarea(m.plano||"", "o que mais você sabe sobre esta planta");
-  fG.rows=5; fE.rows=5; fN.rows=5;
-  w.appendChild(field("Gosta / precisa", fG, "Um por linha."));
-  w.appendChild(field("Não gosta / evitar", fE, "Um por linha. É esta lista que gera o aviso na hora de aplicar."));
-  w.appendChild(field("Anotações", fN));
-  const dica=el("div","hint"); dica.style.marginTop="-6px";
-  dica.textContent = "Também dá pra falar: “a " + m.especie.toLowerCase() + " " + (m.numero||1) + " não gosta de cinza”.";
+  const ft = textarea(pl ? pl.texto : "", MODELO_PLANO);
+  ft.rows = 18; ft.style.lineHeight = "1.5";
+  w.appendChild(field("Plano de trabalho · " + especie, ft,
+    "Escreva do seu jeito. Qualquer título com meses entre parênteses — “SECA (maio–setembro)” — vira um bloco, e o app destaca o bloco da época de hoje."));
+  const dica = el("div","hint"); dica.style.marginTop = "-6px";
+  dica.innerHTML = "Frases que <b>proíbem</b> alguma coisa viram aviso: escreva “nada de cinza nessa fase” " +
+    "e o app avisa se você for aplicar cinza — mas só nos meses daquele bloco.";
   w.appendChild(dica);
-  openSheet("Plano de trabalho · " + nomeMuda(m), w, [btn("Cancelar","sec",closeSheet),
+  if(quantas > 1){
+    const q = el("div","hint");
+    q.textContent = "Vale para as " + quantas + " mudas de " + especie + ".";
+    w.appendChild(q);
+  }
+  openSheet("Plano · " + especie, w, [btn("Cancelar","sec",closeSheet),
     btn("Salvar","pri", async () => {
-      const linhas = t => String(t||"").split("\n").map(s=>s.trim()).filter(s=>s.length>=2);
-      m.gosta = listaLimpa(linhas(fG.value));
-      m.evita = listaLimpa(linhas(fE.value));
-      m.plano = fN.value.trim();
-      m.planoEm = todayISO();
-      await put("mudas", m);
-      const ix = S.mudas.findIndex(x => x.id === m.id); if(ix >= 0) S.mudas[ix] = m;
-      closeSheet(); render(); toast("Plano salvo");
+      await salvarPlano(especie, ft.value);
+      closeSheet(); render(); toast("Plano de " + especie + " salvo");
     })]);
+}
+
+/* desenha os blocos, com o da época de hoje aberto */
+function caixaDePlano(especie){
+  const pl = planoDaEspecie(especie);
+  const w = el("div");
+  if(!pl || !(pl.texto||"").trim()){
+    const vazio = el("div"); vazio.style.cssText = "color:var(--ink2);line-height:1.5";
+    vazio.textContent = "Nada escrito ainda sobre " + especie + ".";
+    w.appendChild(vazio);
+    return w;
+  }
+  const B = blocosDoPlano(pl.texto);
+  const agora = blocoDeHoje(B);
+  if(B.geral){
+    const g = el("div"); g.style.cssText = "white-space:pre-wrap;line-height:1.55;margin-bottom:10px";
+    g.textContent = B.geral;
+    w.appendChild(g);
+  }
+  B.blocos.forEach(b => {
+    const ehAgora = agora && b.nome === agora.nome && b.titulo === agora.titulo;
+    const box = el("div","bloco" + (ehAgora ? " agora" : ""));
+    const top = el("button");
+    const nm = el("span","bn"); nm.textContent = b.nome;
+    top.appendChild(nm);
+    if(ehAgora) top.appendChild(el("span","agorapill","agora"));
+    const mm = el("span","bm"); mm.textContent = ehAgora ? "" : (b.meses.length + " meses");
+    top.appendChild(mm);
+    const corpo = el("div","bt"); corpo.textContent = b.texto;
+    if(!ehAgora) corpo.style.display = "none";
+    top.onclick = () => { corpo.style.display = corpo.style.display === "none" ? "block" : "none"; };
+    box.appendChild(top); box.appendChild(corpo);
+    w.appendChild(box);
+  });
+  if(pl.planoEm) w.appendChild(el("div","t2","atualizado em " + fmtDay(pl.planoEm)));
+  return w;
+}
+
+function screenPlanos(){
+  head("Planos de trabalho","um por espécie"); tab="mais"; stack=null;
+  const v=$("#view"); v.innerHTML="";
+  const especies = [...new Set(S.mudas.map(m => m.especie))].sort();
+  if(!especies.length){
+    v.appendChild(el("div","empty","Cadastre mudas primeiro — o plano é por espécie."));
+  } else {
+    const c=el("div","card");
+    especies.forEach(e => {
+      const n = mudasDaEspecie(e).length;
+      const pl = planoDaEspecie(e);
+      const b=el("button","acard"); const bd=el("div","bd");
+      bd.appendChild(el("div","nm",esc(e)));
+      bd.appendChild(el("div","mt", esc(n + (n===1?" muda":" mudas") + " · " +
+        (pl && (pl.texto||"").trim() ? blocosDoPlano(pl.texto).blocos.length + " blocos por época" : "sem plano"))));
+      b.appendChild(bd);
+      b.appendChild(el("div","pill "+(pl && (pl.texto||"").trim() ? "ok":"neutral"),
+        pl && (pl.texto||"").trim() ? "escrito" : "vazio"));
+      b.onclick=()=>formPlano(e, n);
+      c.appendChild(b);
+    });
+    v.appendChild(c);
+  }
+  const vt=btn("← Voltar","sec",()=>go("mais")); vt.style.marginTop="14px"; vt.style.flex="1"; v.appendChild(vt);
 }
 
 function screenVerbos(){
@@ -3543,6 +3669,7 @@ function screenMais(){
   c.appendChild(item("&#127793;","Mudas",S.mudas.length+"",screenMudas));
   c.appendChild(item("&#128172;","Verbos",listaAcoes().length+"",screenVerbos));
   c.appendChild(item("&#129440;","Problemas",problemasAbertos().length+" abertos",screenProblemas));
+  c.appendChild(item("&#128220;","Planos de trabalho",[...new Set(S.mudas.map(x=>x.especie))].length+"",screenPlanos));
   c.appendChild(item("&#128202;","Resumo","", ()=>abrirResumo(null, 30)));
   v.appendChild(c);
 
@@ -3802,7 +3929,7 @@ function screenSincronia(){
 function semBlobs(r){ const o=Object.assign({},r); delete o.foto; return o; }
 function exportar(){
   const data={versao:4,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
-              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,males:S.males,problemas:S.problemas,regras:S.regras,
+              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,males:S.males,problemas:S.problemas,planos:S.planos,regras:S.regras,
               registros:S.registros.map(semBlobs),config:S.config};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a");
@@ -3818,7 +3945,7 @@ function importar(){
     try{
       const d=JSON.parse(await file.text());
       if(!d||!Array.isArray(d.registros)) throw new Error("formato");
-      for(const s of ["areas","insumos","plantios","mudas","acoes","males","problemas","regras","registros"]){
+      for(const s of ["areas","insumos","plantios","mudas","acoes","males","problemas","planos","regras","registros"]){
         await clearStore(s); for(const o of (d[s]||[])) await put(s,o);
       }
       if(d.config) await put("config",Object.assign({id:"app"},d.config));
@@ -3893,6 +4020,7 @@ async function exemplos(){
       await migrarSituacaoDasAreas();
       await instalarAcoes();
       await instalarMales();
+      await migrarPlanosParaEspecie();
       await saveCfg({vocab: VOCAB_VERSAO});
       await load();
     }
@@ -3908,7 +4036,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,aplicarPlano,avisosDoPlano,temPlano,bateCom,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
