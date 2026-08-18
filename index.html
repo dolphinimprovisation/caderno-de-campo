@@ -33,6 +33,9 @@ input,select,textarea{font:inherit;color:inherit;width:100%}
 .acard.off .nm,.acard.off .mt{opacity:.5}
 .d-muda{background:#5B4B8A}
 .d-problema{background:#C4452F}
+.chip.no{border-color:#E0B4AC;background:#FCF1EF;color:#8C2F22}
+.chip.si{border-color:#B7D9BF;background:#F0F7F1;color:#1F4C2C}
+.avisoplano{margin:0 14px 12px;padding:11px 13px;border-radius:11px;background:#FCF1EF;border:1px solid #E0B4AC;color:#8C2F22;font-size:13.5px;font-weight:600;line-height:1.45}
 .probchip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#A63A28;margin-top:5px}
 .hide{display:none !important}
 
@@ -337,6 +340,48 @@ const ondeDoProblema = p => {
   const a = areaById(p.areaId);
   return (m ? nomeMuda(m) + " · " : "") + (a ? a.nome : "");
 };
+
+/* ---- ficha da muda ----
+   O que a planta gosta e o que faz mal a ela. Não é tarefa: é o que você sabe
+   sobre aquela planta e não quer esquecer na hora de aplicar alguma coisa. */
+const temPlano = m => !!(m && ((m.gosta||[]).length || (m.evita||[]).length || (m.plano||"").trim()));
+const listaLimpa = arr => [...new Set((arr||[]).map(x => String(x||"").trim()).filter(x => x.length >= 2))];
+
+/* o nome do produto encosta em alguma coisa da lista? */
+function bateCom(nome, item){
+  const a = normalizarFala(nome), b = normalizarFala(item);
+  if(!a || !b) return false;
+  if(a === b) return true;
+  if(b.length >= 4 && a.indexOf(b) >= 0) return true;
+  if(a.length >= 4 && b.indexOf(a) >= 0) return true;
+  return parecido(a, b) >= 0.82;
+}
+
+/* devolve os avisos de "essa planta não gosta disso" */
+function avisosDoPlano(d){
+  if(!d || !d.insumoId) return [];
+  const ins = insumoById(d.insumoId); if(!ins) return [];
+  const alvos = d.mudaId ? [mudaById(d.mudaId)] : (d.areaId ? mudasDaArea(d.areaId) : []);
+  const fora = [];
+  alvos.filter(Boolean).forEach(m => {
+    (m.evita || []).forEach(x => {
+      if(bateCom(ins.nome, x)) fora.push(nomeMuda(m) + " não gosta de " + x);
+    });
+  });
+  return [...new Set(fora)];
+}
+
+async function aplicarPlano(mudaId, patch){
+  const m = mudaById(mudaId); if(!m || !patch) return null;
+  if(patch.gosta) m.gosta = listaLimpa((m.gosta||[]).concat(patch.gosta));
+  if(patch.evita) m.evita = listaLimpa((m.evita||[]).concat(patch.evita));
+  if(patch.plano != null) m.plano = patch.plano;
+  m.planoEm = todayISO();
+  await put("mudas", m);
+  const ix = S.mudas.findIndex(x => x.id === m.id);
+  if(ix >= 0) S.mudas[ix] = m;
+  return m;
+}
 
 /* ---- situação da área ---- */
 const areaParada = id => { const a = areaById(id); return !!(a && a.situacao === "parada"); };
@@ -671,7 +716,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "9 · problemas";
+const APP_VERSAO = "11 · plano por espécie";
 const VOCAB_VERSAO = 7;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -1396,6 +1441,33 @@ function interpretar(falaOriginal, ctx){
       }
       if(d.mudaId || d.mudasCandidatas)
         for(const [re, v] of SAUDE_RE) if(re.test(frag)){ d.saudeMuda = v; break; }
+
+      /* "a jaca 2 nao gosta de cinza" · "a jaca 2 gosta de nitrogenio e calcio" */
+      if(d.mudaId || d.mudasCandidatas){
+        const neg = frag.match(/\b(?:nao gosta|nao suporta|nao aceita|nao pode|nao quer|odeia|evita|evitar|faz mal)\s*(?:de\s+|do\s+|da\s+|com\s+|receber\s+)?(.+)$/);
+        const pos = !neg && frag.match(/\b(?:gosta|precisa|prefere|adora|pede|requer)\s*(?:de\s+|do\s+|da\s+)?(.+)$/);
+        const alvo = neg || pos;
+        if(alvo){
+          const itens = String(alvo[1]).split(/\s*(?:,| e )\s*/)
+            .map(s => s.trim()).filter(s => s.length >= 3 && !PALAVRA_BOBA.test(s)).slice(0, 6);
+          if(itens.length){
+            d.planoMuda = neg ? {evita: itens} : {gosta: itens};
+            d.tipo = "observacao";
+            delete d.saudeMuda;          /* "gosta" não é diagnóstico de saúde */
+            /* "nao gosta de cinza" cita o produto, mas não aplicou nada */
+            delete d.insumoId; delete d.unidade; delete d.quantidade; delete d.forma;
+
+            /* Ficha é o que se sabe da ESPÉCIE. Disse "a jaca", sem número?
+               Vale para todas as jacas. Disse "a jaca 2"? Só para ela. */
+            if(d.mudaId){
+              d.planoMudas = [d.mudaId];
+            } else if(d.mudasCandidatas && d.mudasCandidatas.length){
+              d.planoMudas = d.mudasCandidatas.slice();
+              delete d.mudasCandidatas;   /* não precisa escolher: é para todas */
+            }
+          }
+        }
+      }
     }
 
     const n = x => parseFloat(String(x).replace(",","."));
@@ -2103,6 +2175,44 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         c.appendChild(bloco);
       }
 
+      /* aviso: essa planta não gosta disso */
+      const avisos = avisosDoPlano(d);
+      if(avisos.length){
+        const av = el("div","avisoplano");
+        av.textContent = "⚠ " + avisos.join(" · ") + ". Está no plano de trabalho dela.";
+        c.appendChild(av);
+      }
+
+      /* mudança na ficha: mostra o que entra e em quais mudas */
+      if(d.planoMuda && (d.planoMudas || []).length){
+        const bl = el("div"); bl.style.padding = "0 14px 12px";
+        const quais = d.planoMuda.evita || d.planoMuda.gosta || [];
+        const todas = (d._planoTodas || d.planoMudas).slice();
+        d._planoTodas = todas;
+        bl.appendChild(el("div","t2", "Plano · acrescentar em " +
+          (d.planoMuda.evita ? "“Não gosta”" : "“Gosta”") + ":"));
+        const ch = el("div","chips"); ch.style.margin = "6px 0 10px";
+        quais.forEach(x => ch.appendChild(el("span","chip " + (d.planoMuda.evita ? "no" : "si"), esc(x))));
+        bl.appendChild(ch);
+
+        bl.appendChild(el("div","t2", todas.length > 1
+          ? "Vale para estas " + todas.length + " — toque para tirar alguma:"
+          : "Vale para:"));
+        const cm = el("div","chips"); cm.style.marginTop = "6px";
+        todas.forEach(id => {
+          const mm = mudaById(id); if(!mm) return;
+          const dentro = d.planoMudas.indexOf(id) >= 0;
+          const b2 = el("button","chip" + (dentro ? " on" : ""), esc(nomeMuda(mm)));
+          b2.onclick = () => {
+            d.planoMudas = dentro ? d.planoMudas.filter(x => x !== id) : d.planoMudas.concat(id);
+            desenhar();
+          };
+          cm.appendChild(b2);
+        });
+        bl.appendChild(cm);
+        c.appendChild(bl);
+      }
+
       /* como a planta está — só aparece quando há muda; deixar em branco não muda nada */
       if(d.mudaId){
         const m = mudaById(d.mudaId);
@@ -2260,6 +2370,8 @@ function telaConfirmar(texto, drafts, g, previasFixas){
       delete r.regraDias; delete r.alterarRegra; delete r.encerrarRegra;
       const saudeNova = r.saudeMuda; delete r.saudeMuda; delete r.mudasCandidatas; delete r.acaoId;
       const abrirMal = r.malNovo; delete r.malNovo;
+      const planoNovo = r.planoMuda; delete r.planoMuda;
+      const planoAlvos = (r.planoMudas || []).slice(); delete r.planoMudas;
       const fechaId = r.fecharProblema ? r.problemaId : null;
       delete r.fecharProblema; delete r.problemasCandidatos;
       r.id = uid(); r.gravacaoId = g ? g.id : null; r.fala = texto; r.criadoEm = new Date().toISOString();
@@ -2279,6 +2391,8 @@ function telaConfirmar(texto, drafts, g, previasFixas){
         }
       }
       if(fechaId){ await fecharProblema(fechaId, r.data); r.problemaId = fechaId; r.fecho = true; }
+      if(planoNovo && planoAlvos.length)
+        for(const alvo of planoAlvos) await aplicarPlano(alvo, planoNovo);
       if(saudeNova && r.mudaId){
         const m = mudaById(r.mudaId);
         if(m && m.saude !== saudeNova){ m.saude = saudeNova; await put("mudas", m); }
@@ -2731,6 +2845,34 @@ function screenMuda(id){
     sp.appendChild(cp); v.appendChild(sp);
   }
 
+  const sp2=el("div","sec"); sp2.appendChild(el("div","sec-t","Plano de trabalho"));
+  const cp2=el("div","card"); cp2.style.padding="14px 16px";
+  const bloco=(titulo, arr, cls)=>{
+    if(!arr || !arr.length) return;
+    cp2.appendChild(el("div","t2", titulo));
+    const ch=el("div","chips"); ch.style.margin="6px 0 12px";
+    arr.forEach(x=>{ const c=el("span","chip "+cls, esc(x)); c.style.cursor="default"; ch.appendChild(c); });
+    cp2.appendChild(ch);
+  };
+  bloco("Gosta / precisa", m.gosta, "si");
+  bloco("Não gosta / evitar", m.evita, "no");
+  if((m.plano||"").trim()){
+    cp2.appendChild(el("div","t2","Anotações"));
+    const tx=el("div"); tx.style.cssText="white-space:pre-wrap;margin-top:5px;line-height:1.5";
+    tx.textContent=m.plano; cp2.appendChild(tx);
+  }
+  if(!temPlano(m)){
+    const vazio=el("div"); vazio.style.cssText="color:var(--ink2);line-height:1.5";
+    vazio.textContent="Nada anotado ainda. Escreva o que esta planta gosta e o que faz mal a ela — ou fale: “a "+
+      m.especie.toLowerCase()+" "+(m.numero||1)+" não gosta de cinza”.";
+    cp2.appendChild(vazio);
+  }
+  if(m.planoEm) cp2.appendChild(el("div","t2","atualizado em "+fmtDay(m.planoEm)));
+  sp2.appendChild(cp2);
+  const pb=btn(temPlano(m)?"Editar plano":"Escrever o plano","sec",()=>formPlano(m));
+  pb.style.marginTop="10px"; pb.style.flex="1"; sp2.appendChild(pb);
+  v.appendChild(sp2);
+
   const sc=el("div","sec"); sc.appendChild(el("div","sec-t","Como ela está"));
   const chips=el("div","chips"); chips.style.marginBottom="6px";
   SAUDES.forEach(s=>{
@@ -2791,6 +2933,32 @@ function formVerbo(existing){
       closeSheet(); screenVerbos(); toast("Verbo excluído");
     })));
   openSheet(existing ? "Editar verbo" : "Novo verbo", w, foot);
+}
+
+function formPlano(m){
+  if(!m) return;
+  const eb=errBox(), w=el("div"); w.appendChild(eb);
+  const fG=textarea((m.gosta||[]).join("\n"), "um por linha\nex: nitrogênio\ncálcio\nmeia-sombra");
+  const fE=textarea((m.evita||[]).join("\n"), "um por linha\nex: cinza\nfósforo em excesso");
+  const fN=textarea(m.plano||"", "o que mais você sabe sobre esta planta");
+  fG.rows=5; fE.rows=5; fN.rows=5;
+  w.appendChild(field("Gosta / precisa", fG, "Um por linha."));
+  w.appendChild(field("Não gosta / evitar", fE, "Um por linha. É esta lista que gera o aviso na hora de aplicar."));
+  w.appendChild(field("Anotações", fN));
+  const dica=el("div","hint"); dica.style.marginTop="-6px";
+  dica.textContent = "Também dá pra falar: “a " + m.especie.toLowerCase() + " " + (m.numero||1) + " não gosta de cinza”.";
+  w.appendChild(dica);
+  openSheet("Plano de trabalho · " + nomeMuda(m), w, [btn("Cancelar","sec",closeSheet),
+    btn("Salvar","pri", async () => {
+      const linhas = t => String(t||"").split("\n").map(s=>s.trim()).filter(s=>s.length>=2);
+      m.gosta = listaLimpa(linhas(fG.value));
+      m.evita = listaLimpa(linhas(fE.value));
+      m.plano = fN.value.trim();
+      m.planoEm = todayISO();
+      await put("mudas", m);
+      const ix = S.mudas.findIndex(x => x.id === m.id); if(ix >= 0) S.mudas[ix] = m;
+      closeSheet(); render(); toast("Plano salvo");
+    })]);
 }
 
 function screenVerbos(){
@@ -3492,7 +3660,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,aplicarPlano,avisosDoPlano,temPlano,bateCom};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
