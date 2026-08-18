@@ -797,7 +797,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "13 · plano da espécie";
+const APP_VERSAO = "14 · voltar certo";
 const VOCAB_VERSAO = 8;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -2751,8 +2751,16 @@ function telaConfirmar(texto, drafts, g, previasFixas){
 
 /* ============ navegacao ============ */
 let tab="home", stack=null;
-function go(t){ tab=t; stack=null; render(); window.scrollTo(0,0); }
-$("#backBtn").onclick=()=>{ stack=null; render(); };
+/* De onde você veio. Sem isso a seta de voltar joga todo mundo no menu Mais,
+   mesmo quem entrou pela lista de mudas ou pela tela da linha. */
+let voltarFn = null;
+function abrir(destino, volta){ voltarFn = volta || null; stack = destino; render(); window.scrollTo(0,0); }
+function go(t){ tab=t; stack=null; voltarFn=null; render(); window.scrollTo(0,0); }
+$("#backBtn").onclick=()=>{
+  const f = voltarFn; voltarFn = null; stack = null;
+  if(f) f(); else render();
+  window.scrollTo(0,0);
+};
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
   go(b.dataset.tab);
@@ -2895,7 +2903,8 @@ function screenPendentes(){
 function escolherTipo(pre){
   const w=el("div"); const c=el("div","card");
   const it=(ic,lb,fn)=>{ const b=el("button","menu-item"); b.appendChild(el("span","ic",ic));
-    const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t); b.onclick=fn; return b; };
+    const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t);
+    b.onclick=()=>{ voltarFn=null; fn(); }; return b; };
   c.appendChild(it("&#128167;","Irrigação",()=>formIrrigacao(pre)));
   c.appendChild(it("&#129524;","Produto",()=>formInsumo(pre)));
   c.appendChild(it("&#9986;","Poda",()=>formPoda(pre)));
@@ -3043,12 +3052,13 @@ function cardArea(a){
       else cls = n<=2?"ok":n<=5?"warn":"bad"; }
     b.appendChild(el("div","pill "+cls,esc(txt)));
   }
-  b.onclick=()=>{ stack={tipo:"area",id:a.id}; render(); window.scrollTo(0,0); };
+  b.onclick=()=>abrir({tipo:"area",id:a.id}, cardArea.voltarPara || null);
   return b;
 }
 function screenAreas(){
   head("Áreas",""); tab="mais"; stack=null;
   const v=$("#view"); v.innerHTML="";
+  cardArea.voltarPara = screenAreas;
   if(!S.areas.length) v.appendChild(el("div","empty","Nenhuma área cadastrada ainda."));
   else{ const c=el("div","card"); S.areas.forEach(a=>c.appendChild(cardArea(a))); v.appendChild(c); }
   const b=btn("+ Nova área","pri",()=>formArea()); b.style.marginTop="16px"; v.appendChild(b);
@@ -3110,7 +3120,8 @@ function screenAreaDetalhe(id){
       b.appendChild(bd2);
       b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
         esc(SAUDE_LB[m.saude||"bem"])));
-      b.onclick=()=>{ stack={tipo:"muda",id:m.id}; render(); window.scrollTo(0,0); };
+      const volta = voltarFn;
+      b.onclick=()=>abrir({tipo:"muda",id:m.id}, ()=>abrir({tipo:"area",id:a.id}, volta));
       c.appendChild(b);
     });
     sm.appendChild(c);
@@ -3383,7 +3394,7 @@ function screenMudas(){
         b.appendChild(bd);
         b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
           esc(SAUDE_LB[m.saude||"bem"])));
-        b.onclick=()=>{ stack={tipo:"muda",id:m.id}; render(); window.scrollTo(0,0); };
+        b.onclick=()=>abrir({tipo:"muda",id:m.id}, screenMudas);
         c.appendChild(b);
       });
       s.appendChild(c); v.appendChild(s);
@@ -3660,7 +3671,8 @@ function screenMais(){
   const v=$("#view");
   const item=(ic,lb,ch,fn)=>{ const b=el("button","menu-item"); b.appendChild(el("span","ic",ic));
     const t=el("span",null,esc(lb)); t.style.flex="1"; b.appendChild(t);
-    b.appendChild(el("span","ch",esc(ch||""))); b.onclick=fn; return b; };
+    b.appendChild(el("span","ch",esc(ch||"")));
+    b.onclick=()=>{ voltarFn=null; fn(); }; return b; };
 
   const c=el("div","card");
   c.appendChild(item("&#128197;","Combinados",S.regras.filter(r=>r.status!=="encerrada").length+"",screenRegras));
