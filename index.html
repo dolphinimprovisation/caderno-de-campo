@@ -35,6 +35,14 @@ input,select,textarea{font:inherit;color:inherit;width:100%}
 .d-problema{background:#C4452F}
 .chip.no{border-color:#E0B4AC;background:#FCF1EF;color:#8C2F22}
 .chip.si{border-color:#B7D9BF;background:#F0F7F1;color:#1F4C2C}
+.rsm h3{margin:22px 0 6px;font-size:17px}
+.rsm .lead{color:var(--ink2);line-height:1.55;margin:0 0 10px}
+.rsm .tab{width:100%;border-collapse:collapse;margin:8px 0 4px}
+.rsm .tab td{padding:7px 0;border-top:1px solid var(--line);font-size:14px;vertical-align:top}
+.rsm .tab td:first-child{color:var(--ink2);width:42%}
+.rsm .atencao{background:#FCF1EF;border:1px solid #E0B4AC;border-radius:var(--r);padding:13px 15px;margin-bottom:6px}
+.rsm .atencao li{margin:4px 0;line-height:1.45}
+.rsm .cab{color:var(--ink2);font-size:13.5px;margin-bottom:14px}
 .avisoplano{margin:0 14px 12px;padding:11px 13px;border-radius:11px;background:#FCF1EF;border:1px solid #E0B4AC;color:#8C2F22;font-size:13.5px;font-weight:600;line-height:1.45}
 .probchip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#A63A28;margin-top:5px}
 .hide{display:none !important}
@@ -633,6 +641,8 @@ function finalizarEscuta(){
         : "Não ouvi nada. Toque de novo e fale mais perto do aparelho.");
     return;
   }
+  const pedido = pedidoDeResumo(texto);
+  if(pedido){ abrirResumo(pedido.areaId, pedido.dias); return; }
   telaConfirmar(texto, interpretar(texto), null);
 }
 
@@ -716,7 +726,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "11 · plano por espécie";
+const APP_VERSAO = "12 · resumo";
 const VOCAB_VERSAO = 7;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -2042,6 +2052,242 @@ function tarefas(){
                        .sort((x,y) => x.quando.localeCompare(y.quando));
 }
 
+/* ============ resumo ============
+   Tudo aqui é conta em cima do que VOCÊ registrou. Nada de internet, nada de
+   opinião: quantas vezes, há quantos dias, quanto no total. */
+
+function registrosNoPeriodo(areaId, desde){
+  return S.registros.filter(r =>
+    (!areaId || r.areaId === areaId) && (!desde || r.data >= desde));
+}
+
+function resumoDaArea(a, desde){
+  const rs = registrosNoPeriodo(a.id, desde).sort((x,y) => x.data.localeCompare(y.data));
+  const irr = rs.filter(r => r.tipo === "irrigacao");
+  const datas = [...new Set(irr.map(r => r.data))].sort();
+  let intervalo = null;
+  if(datas.length > 1){
+    const vao = (dayStart(datas[datas.length-1]) - dayStart(datas[0])) / MS_DAY;
+    intervalo = Math.round((vao / (datas.length - 1)) * 10) / 10;
+  }
+  const produtos = {};
+  rs.filter(r => r.tipo === "insumo" && r.insumoId).forEach(r => {
+    const k = r.insumoId;
+    produtos[k] = produtos[k] || {vezes:0, total:0, unidade:(insumoById(k)||{}).unidade || ""};
+    produtos[k].vezes++;
+    if(r.quantidade) produtos[k].total += r.quantidade;
+  });
+  const colh = rs.filter(r => r.tipo === "colheita");
+  return {
+    area: a,
+    registros: rs.length,
+    irrigacoes: irr.length,
+    ultimaIrrigacao: datas.length ? datas[datas.length-1] : null,
+    intervalo,
+    produtos,
+    podas: rs.filter(r => r.tipo === "poda").length,
+    colheitas: colh.length,
+    colhido: colh.reduce((s,r) => s + (r.quantidade || 0), 0),
+    observacoes: rs.filter(r => r.tipo === "observacao").length,
+    mudas: mudasDaArea(a.id),
+    problemas: problemasDaArea(a.id),
+    regras: regrasAtivas().filter(r => r.areaId === a.id)
+  };
+}
+
+/* a frase que se lê sozinha */
+function fraseDoResumo(R){
+  const p = [];
+  if(R.irrigacoes){
+    let f = "Irrigada " + (R.irrigacoes === 1 ? "1 vez" : R.irrigacoes + " vezes");
+    if(R.intervalo) f += ", em média a cada " + fmtNum(R.intervalo) + " dias";
+    if(R.ultimaIrrigacao) f += " — a última " + fmtAgo(R.ultimaIrrigacao);
+    p.push(f);
+  } else p.push("Nenhuma irrigação registrada no período");
+
+  const prods = Object.keys(R.produtos);
+  if(prods.length){
+    p.push("Recebeu " + prods.map(k => {
+      const x = R.produtos[k];
+      return (insumoById(k)||{}).nome + " " + x.vezes + "×" + (x.total ? " (" + fmtNum(Math.round(x.total*10)/10) + " " + x.unidade + ")" : "");
+    }).join(", "));
+  }
+  if(R.podas) p.push(R.podas === 1 ? "Uma poda" : R.podas + " podas");
+  if(R.colheitas) p.push("Colhidos " + fmtNum(Math.round(R.colhido*10)/10) + " em " + R.colheitas + (R.colheitas===1?" vez":" vezes"));
+  if(R.observacoes) p.push(R.observacoes === 1 ? "1 observação anotada" : R.observacoes + " observações anotadas");
+  return p.join(". ") + ".";
+}
+
+/* o que pede atenção, em ordem de urgência */
+function pedeAtencao(){
+  const av = [];
+  problemasAbertos().sort((a,b) => a.desdeEm.localeCompare(b.desdeEm)).forEach(p =>
+    av.push({peso: 3, t: nomeDoMal(p.malId) + " em " + ondeDoProblema(p) + ", aberto há " + daysAgo(p.desdeEm) + " dias"}));
+  tarefas().filter(t => t.atraso > 0).sort((a,b) => b.atraso - a.atraso).forEach(t =>
+    av.push({peso: 2, t: nomeDaRegra(t.reg) + " atrasado " + t.atraso + (t.atraso===1?" dia":" dias")}));
+  S.mudas.filter(m => m.saude === "atencao" && !areaParada(m.areaId)).forEach(m =>
+    av.push({peso: 1, t: nomeMuda(m) + " · " + ((areaById(m.areaId)||{}).nome||"") + " pedindo atenção"}));
+  S.areas.filter(a => a.situacao === "parada").forEach(a =>
+    av.push({peso: 0, t: a.nome + " está parada"}));
+  return av.sort((a,b) => b.peso - a.peso).map(x => x.t);
+}
+
+function totaisGerais(desde){
+  const rs = registrosNoPeriodo(null, desde);
+  const prod = {};
+  rs.filter(r => r.tipo === "insumo" && r.insumoId && r.quantidade).forEach(r => {
+    const k = r.insumoId;
+    prod[k] = prod[k] || {total:0, unidade:(insumoById(k)||{}).unidade || ""};
+    prod[k].total += r.quantidade;
+  });
+  return {
+    registros: rs.length,
+    irrigacoes: rs.filter(r => r.tipo === "irrigacao").length,
+    colhido: rs.filter(r => r.tipo === "colheita").reduce((s,r) => s + (r.quantidade||0), 0),
+    produtos: prod
+  };
+}
+
+/* ---- pedido de resumo falado ----
+   Isto NÃO é registro. Pergunta nunca entra no diário. */
+const RESUMO_RE = /\b(resumo|resumir|resuma|me faca um resumo|balanco|relatorio|o que (?:eu )?fiz|o que foi feito|como (?:esta|anda))\b/;
+
+function periodoDaFala(txt){
+  if(/\b(tudo|desde o comeco|desde sempre|sempre|geral|historico completo)\b/.test(txt)) return 0;
+  let m = txt.match(/\bultim[oa]s?\s+(\d+)\s+dias?\b/) || txt.match(/\b(\d+)\s+dias?\b/);
+  if(m) return +m[1];
+  if(/\bultim[oa]s?\s+(\d+)\s+semanas?\b/.test(txt)) return +txt.match(/\bultim[oa]s?\s+(\d+)\s+semanas?\b/)[1] * 7;
+  if(/\b(esta|essa|ultima)\s+semana\b/.test(txt)) return 7;
+  if(/\b(este|esse|ultimo)\s+mes\b/.test(txt)) return 30;
+  if(/\b(este|esse|ultimo)\s+ano\b/.test(txt)) return 365;
+  return null;
+}
+
+function pedidoDeResumo(textoOriginal){
+  const t = normalizarFala(textoOriginal);
+  if(!RESUMO_RE.test(t)) return null;
+  /* se a frase tem verbo de ação de verdade, é registro, não pergunta */
+  const acao = acharAcao(t);
+  if(acao && !/\bo que (?:eu )?fiz|o que foi feito\b/.test(t)) return null;
+  const ar = acharNoTexto(t, S.areas, termosDaArea, 0.72);
+  const dias = periodoDaFala(t);
+  return {areaId: ar ? ar.item.id : null, dias: dias == null ? 30 : dias};
+}
+
+let resumoAlvo = null, resumoDias = 30;
+function abrirResumo(areaId, dias){
+  resumoAlvo = areaId || null;
+  if(dias != null) resumoDias = dias;
+  tab = "mais"; stack = {tipo:"resumo"};
+  render(); window.scrollTo(0,0);
+}
+
+function screenResumo(){
+  const a = resumoAlvo ? areaById(resumoAlvo) : null;
+  const desde = resumoDias ? new Date(dayStart(todayISO()) - resumoDias*MS_DAY).toISOString().slice(0,10) : null;
+  const rotulo = resumoDias ? "últimos " + resumoDias + " dias" : "desde o começo";
+  head("Resumo", a ? a.nome : rotulo);
+
+  const v = $("#view"); v.innerHTML = "";
+  const w = el("div","rsm"); v.appendChild(w);
+
+  /* período */
+  const sel = el("div","chips"); sel.style.marginBottom = "14px";
+  [[7,"7 dias"],[30,"30 dias"],[90,"90 dias"],[0,"tudo"]].forEach(([d,lb]) => {
+    const b = el("button","chip" + (resumoDias === d ? " on" : ""), lb);
+    b.onclick = () => { resumoDias = d; render(); };
+    sel.appendChild(b);
+  });
+  w.appendChild(sel);
+
+  const alvos = a ? [a] : S.areas;
+  const rs = registrosNoPeriodo(a ? a.id : null, desde);
+  const cab = el("div","cab");
+  cab.textContent = (desde ? fmtDay(desde) + " a " + fmtDay(todayISO()) : "todo o histórico") +
+    " · " + alvos.length + (alvos.length === 1 ? " linha" : " linhas") +
+    " · " + rs.length + (rs.length === 1 ? " registro" : " registros");
+  w.appendChild(cab);
+
+  /* o que pede atenção — só no resumo geral */
+  if(!a){
+    const av = pedeAtencao();
+    if(av.length){
+      const box = el("div","atencao");
+      box.appendChild(el("div","sec-t","O que pede atenção agora"));
+      const ul = el("ul"); ul.style.cssText = "margin:6px 0 0;padding-left:18px";
+      av.slice(0,8).forEach(t => { const li = el("li"); li.textContent = t; ul.appendChild(li); });
+      box.appendChild(ul);
+      w.appendChild(box);
+    }
+  }
+
+  if(!alvos.length){ w.appendChild(el("div","empty","Nenhuma área cadastrada.")); return; }
+
+  alvos.forEach(ar => {
+    const R = resumoDaArea(ar, desde);
+    if(!a && !R.registros && !R.problemas.length && !R.mudas.length) return;
+
+    const h = el("h3");
+    h.textContent = ar.nome + (ar.situacao === "parada" ? " · Parada" : "");
+    w.appendChild(h);
+
+    if(R.mudas.length){
+      const sub2 = el("div","cab"); sub2.style.marginBottom = "6px";
+      sub2.textContent = R.mudas.map(nomeMuda).join(" · ");
+      w.appendChild(sub2);
+    }
+
+    const lead = el("p","lead");
+    lead.textContent = fraseDoResumo(R);
+    w.appendChild(lead);
+
+    if(R.problemas.length){
+      const pr = el("p","lead");
+      pr.style.color = "#A63A28"; pr.style.fontWeight = "600";
+      pr.textContent = R.problemas.map(p => nomeDoMal(p.malId) + " aberto há " + daysAgo(p.desdeEm) + " dias").join(" · ");
+      w.appendChild(pr);
+    }
+
+    const tab2 = el("table","tab");
+    const linha = (k, val) => { if(!val) return; const tr = el("tr");
+      const td1 = el("td"); td1.textContent = k; const td2 = el("td"); td2.textContent = val;
+      tr.appendChild(td1); tr.appendChild(td2); tab2.appendChild(tr); };
+    linha("Irrigações", R.irrigacoes ? R.irrigacoes + (R.intervalo ? " · a cada " + fmtNum(R.intervalo) + " dias" : "") : null);
+    const prods = Object.keys(R.produtos);
+    linha("Produtos", prods.length ? prods.map(k => (insumoById(k)||{}).nome + " " + R.produtos[k].vezes + "×" +
+      (R.produtos[k].total ? " (" + fmtNum(Math.round(R.produtos[k].total*10)/10) + " " + R.produtos[k].unidade + ")" : "")).join(" · ") : null);
+    linha("Podas", R.podas || null);
+    linha("Colheita", R.colheitas ? fmtNum(Math.round(R.colhido*10)/10) + " em " + R.colheitas + (R.colheitas===1?" vez":" vezes") : null);
+    linha("Combinados", R.regras.length ? R.regras.map(x => nomeDaRegra(x).split(" · ")[0] + " " + cadaQuantos(x.frequencia)).join(" · ") : null);
+    const evita = [...new Set(R.mudas.flatMap(m => m.evita || []))];
+    linha("Evitar", evita.length ? evita.join(", ") : null);
+    if(tab2.children.length) w.appendChild(tab2);
+  });
+
+  /* totais */
+  if(!a){
+    const T = totaisGerais(desde);
+    const partes = [];
+    if(T.irrigacoes) partes.push(T.irrigacoes + " irrigações");
+    Object.keys(T.produtos).forEach(k => partes.push((insumoById(k)||{}).nome + " " +
+      fmtNum(Math.round(T.produtos[k].total*10)/10) + " " + T.produtos[k].unidade));
+    if(T.colhido) partes.push(fmtNum(Math.round(T.colhido*10)/10) + " colhidos");
+    if(partes.length){
+      const tt = el("div","sec"); tt.style.marginTop = "26px";
+      tt.appendChild(el("div","sec-t","Ao todo no período"));
+      const p2 = el("p","lead"); p2.textContent = partes.join(" · ") + ".";
+      tt.appendChild(p2); w.appendChild(tt);
+    }
+  }
+
+  if(a){
+    const tudo = btn("Ver o resumo de todas as linhas","sec", () => abrirResumo(null, resumoDias));
+    tudo.style.marginTop = "18px"; tudo.style.flex = "1"; w.appendChild(tudo);
+  }
+  const vt = btn("← Voltar","sec", () => { stack = null; resumoAlvo = null; render(); });
+  vt.style.marginTop = "10px"; vt.style.flex = "1"; w.appendChild(vt);
+}
+
 /* ============ tela de confirmação ============ */
 function telaConfirmar(texto, drafts, g, previasFixas){
   const w = el("div");
@@ -2449,6 +2695,7 @@ function render(){
   navBadge();
   if(stack && stack.tipo==="area") return screenAreaDetalhe(stack.id);
   if(stack && stack.tipo==="muda") return screenMuda(stack.id);
+  if(stack && stack.tipo==="resumo") return screenResumo();
   if(tab==="home") return screenHome();
   if(tab==="agenda") return screenAgenda();
   if(tab==="pend") return screenPendentes();
@@ -3296,6 +3543,7 @@ function screenMais(){
   c.appendChild(item("&#127793;","Mudas",S.mudas.length+"",screenMudas));
   c.appendChild(item("&#128172;","Verbos",listaAcoes().length+"",screenVerbos));
   c.appendChild(item("&#129440;","Problemas",problemasAbertos().length+" abertos",screenProblemas));
+  c.appendChild(item("&#128202;","Resumo","", ()=>abrirResumo(null, 30)));
   v.appendChild(c);
 
   const c2=el("div","card"); c2.style.marginTop="18px";
@@ -3660,7 +3908,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,aplicarPlano,avisosDoPlano,temPlano,bateCom};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,aplicarPlano,avisosDoPlano,temPlano,bateCom,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
