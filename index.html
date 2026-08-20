@@ -42,6 +42,14 @@ input,select,textarea{font:inherit;color:inherit;width:100%}
 .bloco.agora{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
 .bloco.agora .bn{color:var(--green-d)}
 .bloco .bt{padding:0 13px 13px;white-space:pre-wrap;line-height:1.55;font-size:14px}
+.lemb{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.lemb:first-child{border-top:0}
+.lemb .cx{flex:0 0 auto;width:22px;height:22px;border-radius:6px;border:2px solid var(--line);background:none;cursor:pointer;margin-top:1px}
+.lemb .cx:hover{border-color:var(--green)}
+.lemb .tx{flex:1;line-height:1.45;font-size:14.5px}
+.lemb .dt{font-size:12.5px;color:var(--ink2);margin-top:2px}
+.lemb .dt.venceu{color:#A63A28;font-weight:700}
+.lemb.pronto .tx{text-decoration:line-through;opacity:.5}
 .agorapill{background:var(--green);color:#fff;border-radius:20px;padding:2px 9px;font-size:11.5px;font-weight:700}
 .rsm h3{margin:22px 0 6px;font-size:17px}
 .rsm .lead{color:var(--ink2);line-height:1.55;margin:0 0 10px}
@@ -261,7 +269,7 @@ function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
 const DB_NAME="caderno-campo", DB_VER=8;
-const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","planos","registros","regras","gravacoes","pendentes","config"];
+const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","planos","lembretes","registros","regras","gravacoes","pendentes","config"];
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -276,8 +284,8 @@ function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"r
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* o que viaja pra nuvem */
-const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", males:"mal", problemas:"problema", planos:"plano", registros:"registro", regras:"regra"};
-const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", mal:"males", problema:"problemas", plano:"planos", registro:"registros", regra:"regras"};
+const TIPO_DA_LOJA = {areas:"area", insumos:"insumo", plantios:"plantio", mudas:"muda", acoes:"acao", males:"mal", problemas:"problema", planos:"plano", lembretes:"lembrete", registros:"registro", regras:"regra"};
+const LOJA_DO_TIPO = {area:"areas", insumo:"insumos", plantio:"plantios", muda:"mudas", acao:"acoes", mal:"males", problema:"problemas", plano:"planos", lembrete:"lembretes", registro:"registros", regra:"regras"};
 
 async function marcarPendente(loja, id, apagado, quando){
   const tipo = TIPO_DA_LOJA[loja]; if(!tipo) return;
@@ -305,12 +313,12 @@ function all(store){ return new Promise((ok,err)=>{ const r=tx(store,"readonly")
 function clearStore(store){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").clear(); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
 /* ============ estado ============ */
-const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], males:[], problemas:[], planos:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
+const S = { areas:[], insumos:[], plantios:[], mudas:[], acoes:[], males:[], problemas:[], planos:[], lembretes:[], registros:[], regras:[], gravacoes:[], pendentes:[], config:{} };
 /* por nome, não por posição: acrescentar uma loja não pode embaralhar o estado */
 async function load(){
   const res = await Promise.all(STORES.map(all));
   const por = {}; STORES.forEach((s,i) => por[s] = res[i] || []);
-  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes; S.males=por.males; S.problemas=por.problemas; S.planos=por.planos;
+  S.areas=por.areas; S.insumos=por.insumos; S.plantios=por.plantios; S.mudas=por.mudas; S.acoes=por.acoes; S.males=por.males; S.problemas=por.problemas; S.planos=por.planos; S.lembretes=por.lembretes;
   S.registros=por.registros; S.regras=por.regras; S.gravacoes=por.gravacoes; S.pendentes=por.pendentes;
   S.config = (por.config.find(x=>x.id==="app")||{id:"app"});
 }
@@ -491,6 +499,34 @@ function bateCom(nome, item){
   if(b.length >= 4 && a.indexOf(b) >= 0) return true;
   if(a.length >= 4 && b.indexOf(a) >= 0) return true;
   return parecido(a, b) >= 0.82;
+}
+
+/* ---- lembretes ----
+   Tarefa única, ao contrário do combinado, que se repete. Pode ser de uma linha,
+   de uma muda, ou de mais ninguém ("comprar sementes"). */
+const lembretesAbertos = () => S.lembretes.filter(l => !l.feito);
+const lembretesDaArea = areaId => lembretesAbertos().filter(l => l.areaId === areaId && !l.mudaId);
+const lembretesDaMuda = mudaId => lembretesAbertos().filter(l => l.mudaId === mudaId);
+const lembretesSoltos = () => lembretesAbertos().filter(l => !l.areaId && !l.mudaId);
+const ondeDoLembrete = l => {
+  const m = l.mudaId ? mudaById(l.mudaId) : null;
+  const a = l.areaId ? areaById(l.areaId) : null;
+  return m ? nomeMuda(m) + (a ? " · " + a.nome : "") : (a ? a.nome : "");
+};
+
+async function salvarLembrete(o){
+  const l = Object.assign({id: uid(), texto: "", areaId: null, mudaId: null, quando: null,
+                           feito: false, feitoEm: null, criadoEm: new Date().toISOString()}, o);
+  await put("lembretes", l);
+  const ix = S.lembretes.findIndex(x => x.id === l.id);
+  if(ix >= 0) S.lembretes[ix] = l; else S.lembretes.push(l);
+  return l;
+}
+async function marcarLembrete(id, feito){
+  const l = S.lembretes.find(x => x.id === id); if(!l) return null;
+  l.feito = !!feito; l.feitoEm = feito ? todayISO() : null;
+  await put("lembretes", l);
+  return l;
 }
 
 /* ---- situação da área ---- */
@@ -743,6 +779,8 @@ function finalizarEscuta(){
         : "Não ouvi nada. Toque de novo e fale mais perto do aparelho.");
     return;
   }
+  const lem = pedidoDeLembrete(texto);
+  if(lem){ telaLembrete(texto, lem); return; }
   const pedido = pedidoDeResumo(texto);
   if(pedido){ abrirResumo(pedido.areaId, pedido.dias); return; }
   telaConfirmar(texto, interpretar(texto), null);
@@ -828,7 +866,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "15 · ordem na linha";
+const APP_VERSAO = "16 · lembretes";
 const VOCAB_VERSAO = 8;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -1463,6 +1501,17 @@ const FORMAS_RE  = [[/\bfertirriga/,"Fertirrigação"],[/\bfoliar|na folha|nas f
 const MESES = {janeiro:1,fevereiro:2,marco:3,abril:4,maio:5,junho:6,julho:7,
                agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
 
+/* "julho" e "junho" são 80% parecidos: pegar o primeiro da lista dava junho sempre.
+   Aqui vence o mais parecido, não o que aparece antes. */
+function melhorMes(palavra){
+  let melhor = null;
+  Object.keys(MESES).forEach(k => {
+    const s = parecido(palavra, k);
+    if(s >= 0.8 && (!melhor || s > melhor.s)) melhor = {s, k};
+  });
+  return melhor ? melhor.k : null;
+}
+
 function dataISO(y, m, d){
   return y + "-" + String(m).padStart(2,"0") + "-" + String(d).padStart(2,"0");
 }
@@ -1473,7 +1522,7 @@ function acharData(txt, hoje){
   const [ay, am, ad] = hoje.split("-").map(Number);
   let m = txt.match(/\b(\d{1,2})\s+de\s+([a-z]+)/);
   if(m){
-    const nome = Object.keys(MESES).find(x => parecido(m[2], x) >= 0.8);
+    const nome = melhorMes(m[2]);
     if(nome){
       const dia = +m[1], mes = MESES[nome];
       let ano = ay;
@@ -1496,6 +1545,68 @@ function acharData(txt, hoje){
     return dataISO(ano, mes, dia);
   }
   return hoje;
+}
+
+/* ---- data que ainda vai acontecer ----
+   O resto do app lê datas para trás: tudo que você registra já aconteceu. Lembrete
+   é o contrário — "sexta" é a próxima sexta, não a passada. Por isso um leitor à parte. */
+const DIAS_SEMANA = {domingo:0, segunda:1, terca:2, quarta:3, quinta:4, sexta:5, sabado:6};
+
+function dataFutura(txt, hoje){
+  /* números por extenso viram dígitos: "daqui a tres dias" tem que valer */
+  const t = numerosParaDigitos(semAcento(txt));
+  const base = dayStart(hoje || todayISO());
+  const soma = n => new Date(base + n * MS_DAY).toISOString().slice(0,10);
+
+  if(/\bdepois de amanha\b/.test(t)) return soma(2);   /* antes de "amanha", senão nunca chega aqui */
+  if(/\bhoje\b/.test(t)) return soma(0);
+  if(/\bamanha\b/.test(t)) return soma(1);
+
+  let m = t.match(/\b(?:daqui a|em|dentro de)\s+(\d+)\s+(dias?|semanas?|mes(?:es)?)\b/);
+  if(m){ const n = +m[1]; return soma(/semana/.test(m[2]) ? n*7 : /mes/.test(m[2]) ? n*30 : n); }
+
+  /* dia da semana: sempre a PRÓXIMA ocorrência futura */
+  const nomes = Object.keys(DIAS_SEMANA);
+  const achou = nomes.find(d => new RegExp("\\b" + d + "(\\s|-|$)").test(t));
+  if(achou){
+    const alvo = DIAS_SEMANA[achou];
+    const hj = new Date(base).getDay();
+    let dif = (alvo - hj + 7) % 7;
+    if(dif === 0) dif = 7;                       /* "sexta" numa sexta é a que vem */
+    if(/\bque vem|proxim/.test(t) && dif < 7) dif += 0;
+    return soma(dif);
+  }
+
+  m = t.match(/\b(\d{1,2})\s+de\s+([a-z]+)/);
+  if(m){
+    const nome = melhorMes(m[2]);
+    if(nome){
+      const [ay, am, ad] = (hoje || todayISO()).split("-").map(Number);
+      const dia = +m[1], mes = MESES[nome];
+      let ano = ay;
+      if(mes < am || (mes === am && dia < ad)) ano++;   /* mês já passou = ano que vem */
+      return dataISO(ano, mes, dia);
+    }
+  }
+  m = t.match(/\bdia (\d{1,2})\b/);
+  if(m){
+    const [ay, am, ad] = (hoje || todayISO()).split("-").map(Number);
+    const dia = +m[1];
+    let mes = am, ano = ay;
+    if(dia < ad){ mes++; if(mes > 12){ mes = 1; ano++; } }
+    return dataISO(ano, mes, dia);
+  }
+  m = t.match(/\b(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?/);
+  if(m){
+    const [ay, am, ad] = (hoje || todayISO()).split("-").map(Number);
+    let ano = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : ay;
+    const mes = +m[2], dia = +m[1];
+    if(!m[3] && (mes < am || (mes === am && dia < ad))) ano++;
+    return dataISO(ano, mes, dia);
+  }
+  if(/\b(semana que vem|proxima semana)\b/.test(t)) return soma(7);
+  if(/\b(mes que vem|proximo mes)\b/.test(t)) return soma(30);
+  return null;
 }
 
 /* "a cada 15 dias" -> 15 · "toda semana" -> 7 · "a cada 2 semanas" -> 14 · "todo mes" -> 30 */
@@ -2275,6 +2386,35 @@ function totaisGerais(desde){
 
 /* ---- pedido de resumo falado ----
    Isto NÃO é registro. Pergunta nunca entra no diário. */
+const LEMBRETE_RE = /\b(lembrete|lembrar|me lembra|nao esquecer|nao deixar de|preciso|tenho que|tenho de)\b/;
+
+/* "lembrete de podar a jaca 2 na sexta" */
+function pedidoDeLembrete(textoOriginal, hoje){
+  const bruto = String(textoOriginal || "").trim();
+  const t = normalizarFala(bruto);
+  if(!LEMBRETE_RE.test(t)) return null;
+
+  /* o texto do lembrete é o que vem depois da palavra-chave */
+  let corpo = bruto.replace(/^[\s,.]*/, "");
+  const m = normalizarFala(corpo).match(LEMBRETE_RE);
+  if(m){
+    const pos = normalizarFala(corpo).indexOf(m[0]);
+    if(pos >= 0) corpo = corpo.slice(pos + m[0].length);
+  }
+  corpo = corpo.replace(/^\s*(de|do|da|para|pra|que|:|,|-)\s*/i, "").trim();
+
+  const ar = acharNoTexto(t, S.areas, termosDaArea, 0.72);
+  const mm = acharMuda(t, S.mudas, ar ? ar.item.id : null);
+  const quando = dataFutura(t, hoje);
+  return {
+    texto: corpo || bruto,
+    areaId: (mm && mm.muda) ? mm.muda.areaId : (ar ? ar.item.id : null),
+    mudaId: (mm && mm.muda) ? mm.muda.id : null,
+    candidatas: (mm && mm.candidatas) ? mm.candidatas.map(x => x.id) : null,
+    quando: quando
+  };
+}
+
 const RESUMO_RE = /\b(resumo|resumir|resuma|me faca um resumo|balanco|relatorio|o que (?:eu )?fiz|o que foi feito|como (?:esta|anda))\b/;
 
 function periodoDaFala(txt){
@@ -2411,6 +2551,51 @@ function screenResumo(){
   }
   const vt = btn("← Voltar","sec", () => { stack = null; resumoAlvo = null; render(); });
   vt.style.marginTop = "10px"; vt.style.flex = "1"; w.appendChild(vt);
+}
+
+/* confirmação curta do lembrete falado */
+function telaLembrete(textoOriginal, lem){
+  const w = el("div");
+  const eb = errBox(); w.appendChild(eb);
+  w.appendChild(el("div","fala-orig", "“" + esc(textoOriginal) + "”"));
+
+  const c = el("div","card"); c.style.padding = "14px 16px";
+  const fTx = input("text", lem.texto, "o que você quer lembrar");
+  const fData = input("date", lem.quando || "");
+  c.appendChild(field("Lembrete", fTx));
+  c.appendChild(field("Quando", fData, lem.quando
+    ? "Entendi pela sua fala. Apague se não quiser data."
+    : "Sem data ele fica na lista de pendentes, sem sumir."));
+  const onde = ondeDoLembrete(lem.mudaId || lem.areaId ? lem : {areaId: lem.areaId, mudaId: lem.mudaId});
+  if(onde) c.appendChild(el("div","t2", "Fica em: " + onde));
+  w.appendChild(c);
+
+  if(lem.candidatas && lem.candidatas.length){
+    const bloco = el("div","escolha");
+    bloco.appendChild(el("div","sec-t","De qual muda?"));
+    const chips = el("div","chips");
+    lem.candidatas.forEach(id => {
+      const m = mudaById(id); if(!m) return;
+      const ch = el("button","chip", esc(nomeMuda(m)));
+      ch.onclick = () => { lem.mudaId = m.id; lem.areaId = m.areaId; lem.candidatas = null;
+        closeSheet(); telaLembrete(textoOriginal, lem); };
+      chips.appendChild(ch);
+    });
+    bloco.appendChild(chips);
+    const pular = el("button","linkbtn","é da linha toda");
+    pular.onclick = () => { lem.candidatas = null; closeSheet(); telaLembrete(textoOriginal, lem); };
+    bloco.appendChild(pular);
+    w.appendChild(bloco);
+  }
+
+  openSheet("Anotar lembrete", w, [btn("Descartar","sec", closeSheet),
+    btn("Salvar","pri", async () => {
+      if(!fTx.value.trim()) return showErr(eb, "Não entendi o que anotar.");
+      await salvarLembrete({texto: fTx.value.trim(), quando: fData.value || null,
+                            areaId: lem.areaId || null, mudaId: lem.mudaId || null});
+      closeSheet(); render();
+      toast(fData.value ? "Lembrete na agenda" : "Lembrete anotado");
+    })]);
 }
 
 /* ============ tela de confirmação ============ */
@@ -3125,6 +3310,9 @@ function screenAreaDetalhe(id){
     });
   tg.style.flex="1"; sw.appendChild(tg); v.appendChild(sw);
 
+  v.appendChild(caixaLembretes(lembretesDaArea(a.id), "Lembretes desta linha",
+    () => formLembrete({areaId: a.id})));
+
   const probs=problemasDaArea(a.id);
   if(probs.length){
     const sp=el("div","sec"); sp.appendChild(el("div","sec-t","Problemas abertos"));
@@ -3228,6 +3416,9 @@ function screenMuda(id){
   if(m.obs) kv("Observação",m.obs);
   v.appendChild(hd);
 
+  v.appendChild(caixaLembretes(lembretesDaMuda(m.id), "Lembretes desta muda",
+    () => formLembrete({areaId: m.areaId, mudaId: m.id})));
+
   const pm=problemasDaMuda(m.id);
   if(pm.length){
     const sp=el("div","sec"); sp.appendChild(el("div","sec-t","Problemas abertos"));
@@ -3321,6 +3512,72 @@ const MODELO_PLANO =
 "O que fazer nesta época. Ex: irrigação regular, mulch grosso. Nada de cinza nessa fase.\n\n" +
 "CHUVAS (novembro–março)\n" +
 "O que muda quando chove. Ex: chorume 1:10 a cada 15 dias.\n";
+
+/* o quadradinho de lembrete: um toque dá baixa */
+function linhaLembrete(l, mostrarOnde){
+  const w = el("div","lemb" + (l.feito ? " pronto" : ""));
+  const cx = el("button","cx");
+  if(l.feito) cx.innerHTML = "&#10003;";
+  cx.onclick = async () => { await marcarLembrete(l.id, !l.feito); render();
+    toast(l.feito ? "Lembrete de volta" : "Feito"); };
+  w.appendChild(cx);
+  const bd = el("div","tx");
+  bd.appendChild(document.createTextNode(l.texto));
+  const partes = [];
+  if(mostrarOnde && ondeDoLembrete(l)) partes.push(ondeDoLembrete(l));
+  if(l.quando) partes.push(fmtDay(l.quando));
+  if(partes.length){
+    const d = el("div","dt" + (l.quando && daysAgo(l.quando) >= 0 && !l.feito ? " venceu" : ""));
+    d.textContent = partes.join(" · ") + (l.quando && !l.feito && daysAgo(l.quando) > 0 ? " · atrasado" : "");
+    bd.appendChild(d);
+  }
+  w.appendChild(bd);
+  const x = el("button","mini d"); x.textContent = "×"; x.title = "excluir";
+  x.style.cssText = "flex:0 0 auto;padding:2px 9px";
+  x.onclick = () => confirmDel("Excluir este lembrete?", l.texto, async () => {
+    await del("lembretes", l.id); S.lembretes = S.lembretes.filter(x2 => x2.id !== l.id);
+    closeSheet(); render(); toast("Lembrete excluído");
+  });
+  w.appendChild(x);
+  return w;
+}
+
+function formLembrete(pre){
+  pre = pre || {};
+  const eb = errBox(), w = el("div"); w.appendChild(eb);
+  const fTx = input("text", pre.texto || "", "ex: podar a jaca, comprar sementes");
+  const fData = input("date", pre.quando || "");
+  const onde = [{label:"— nenhum lugar —", value:""}].concat(areaOptions());
+  const fArea = selectEl(onde, pre.areaId || "");
+  w.appendChild(field("O quê", fTx));
+  w.appendChild(field("Quando (opcional)", fData, "Com data, entra na agenda. Sem data, fica na lista de pendentes."));
+  w.appendChild(field("De qual lugar (opcional)", fArea));
+  openSheet(pre.id ? "Editar lembrete" : "Novo lembrete", w, [btn("Cancelar","sec",closeSheet),
+    btn("Salvar","pri", async () => {
+      if(!fTx.value.trim()) return showErr(eb, "Escreva o lembrete.");
+      await salvarLembrete(Object.assign({}, pre, {texto: fTx.value.trim(),
+        quando: fData.value || null, areaId: fArea.value || pre.areaId || null}));
+      closeSheet(); render(); toast("Lembrete anotado");
+    })]);
+}
+
+/* a caixinha que aparece na linha e na muda */
+function caixaLembretes(lista, titulo, aoNovo){
+  const s = el("div","sec");
+  const cab = el("div"); cab.style.cssText = "display:flex;align-items:baseline;gap:10px";
+  const tt = el("div","sec-t", titulo); tt.style.flex = "1"; cab.appendChild(tt);
+  const nb = el("button","linkbtn","+ Lembrete"); nb.onclick = aoNovo; cab.appendChild(nb);
+  s.appendChild(cab);
+  if(lista.length){
+    const c = el("div","card"); c.style.padding = "4px 14px";
+    lista.forEach(l => c.appendChild(linhaLembrete(l, false)));
+    s.appendChild(c);
+  } else {
+    const e = el("div","t2"); e.textContent = "Nenhum lembrete aqui.";
+    s.appendChild(e);
+  }
+  return s;
+}
 
 function formPlano(especie, quantas){
   const pl = planoDaEspecie(especie);
@@ -3480,6 +3737,23 @@ function screenAgenda(){
 
   const lista = tarefas();
 
+  const lembs = lembretesAbertos();
+  const comData = lembs.filter(l => l.quando).sort((a,b) => a.quando.localeCompare(b.quando));
+  const semData = lembs.filter(l => !l.quando);
+
+  const caixaL = (titulo, arr) => {
+    if(!arr.length) return;
+    const sec = el("div","sec");
+    const cab = el("div"); cab.style.cssText = "display:flex;align-items:baseline;gap:10px";
+    const tt = el("div","sec-t", titulo); tt.style.flex = "1"; cab.appendChild(tt);
+    const nb = el("button","linkbtn","+ Lembrete"); nb.onclick = () => formLembrete({});
+    cab.appendChild(nb); sec.appendChild(cab);
+    const c = el("div","card"); c.style.padding = "4px 14px";
+    arr.forEach(l => c.appendChild(linhaLembrete(l, true)));
+    sec.appendChild(c); v.appendChild(sec);
+  };
+  caixaL("Lembretes", comData);
+
   const abertos = problemasAbertos().sort((a,b) => a.desdeEm.localeCompare(b.desdeEm));
   if(abertos.length){
     const sec = el("div","sec");
@@ -3498,7 +3772,7 @@ function screenAgenda(){
     sec.appendChild(c); v.appendChild(sec);
   }
 
-  if(!lista.length && !abertos.length){
+  if(!lista.length && !abertos.length && !lembs.length){
     const e = el("div","empty"); e.style.textAlign = "left";
     e.innerHTML = "<b>Nenhum combinado ainda.</b><br><br>Fale, por exemplo: <i>“apliquei neem na estufa 1 a cada 7 dias”</i>. " +
       "A partir daí eu passo a te cobrar, e a data anda sozinha toda vez que você registrar a aplicação.";
@@ -3527,10 +3801,23 @@ function screenAgenda(){
     v.appendChild(sec);
   };
 
-  if(!lista.length) return;
   bloco("Atrasado", lista.filter(t => t.atraso > 0));
   bloco("Vence hoje", lista.filter(t => t.atraso === 0));
   bloco("Vem por aí", lista.filter(t => t.atraso < 0));
+
+  caixaL("Lembretes sem data", semData);
+
+  const feitos = S.lembretes.filter(l => l.feito)
+    .sort((a,b) => String(b.feitoEm).localeCompare(String(a.feitoEm))).slice(0, 20);
+  if(feitos.length){
+    const sec = el("div","sec");
+    const bt = el("button","linkbtn", "Lembretes feitos (" + feitos.length + ")");
+    sec.appendChild(bt);
+    const c = el("div","card"); c.style.cssText = "padding:4px 14px;display:none";
+    feitos.forEach(l => c.appendChild(linhaLembrete(l, true)));
+    bt.onclick = () => { c.style.display = c.style.display === "none" ? "block" : "none"; };
+    sec.appendChild(c); v.appendChild(sec);
+  }
 
   const nota = el("div","empty");
   nota.style.cssText = "margin-top:6px;text-align:left;font-size:14px";
@@ -4003,7 +4290,7 @@ function screenSincronia(){
 function semBlobs(r){ const o=Object.assign({},r); delete o.foto; return o; }
 function exportar(){
   const data={versao:4,exportadoEm:new Date().toISOString(),areas:S.areas,insumos:S.insumos,
-              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,males:S.males,problemas:S.problemas,planos:S.planos,regras:S.regras,
+              plantios:S.plantios,mudas:S.mudas,acoes:S.acoes,males:S.males,problemas:S.problemas,planos:S.planos,lembretes:S.lembretes,regras:S.regras,
               registros:S.registros.map(semBlobs),config:S.config};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a");
@@ -4019,7 +4306,7 @@ function importar(){
     try{
       const d=JSON.parse(await file.text());
       if(!d||!Array.isArray(d.registros)) throw new Error("formato");
-      for(const s of ["areas","insumos","plantios","mudas","acoes","males","problemas","planos","regras","registros"]){
+      for(const s of ["areas","insumos","plantios","mudas","acoes","males","problemas","planos","lembretes","regras","registros"]){
         await clearStore(s); for(const o of (d[s]||[])) await put(s,o);
       }
       if(d.config) await put("config",Object.assign({id:"app"},d.config));
@@ -4110,7 +4397,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,mudasDaAreaAlfa,moverMuda,numerarOrdem,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,mudasDaAreaAlfa,moverMuda,numerarOrdem,dataFutura,pedidoDeLembrete,salvarLembrete,marcarLembrete,lembretesAbertos,lembretesDaArea,lembretesDaMuda,lembretesSoltos,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
