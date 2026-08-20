@@ -268,8 +268,11 @@ function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite
 function fmtNum(n){ return String(n).replace(".",","); }
 
 /* ============ banco ============ */
-const DB_NAME="caderno-campo", DB_VER=8;
+const DB_NAME="caderno-campo";
 const STORES=["areas","insumos","plantios","mudas","acoes","males","problemas","planos","lembretes","registros","regras","gravacoes","pendentes","config"];
+/* A versão nasce da lista: acrescentou loja, subiu a versão sozinha. Já esqueci de
+   subir na mão uma vez e quebrei o aparelho de quem já tinha dados — nunca mais. */
+const DB_VER = 10 + STORES.length;
 let _db=null;
 function open(){
   return new Promise((ok,err)=>{
@@ -280,6 +283,7 @@ function open(){
   });
 }
 function tx(store,mode){ return _db.transaction(store,mode).objectStore(store); }
+function fecharBanco(){ if(_db){ _db.close(); _db = null; } }
 function putBruto(store,obj){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").put(obj); r.onsuccess=()=>ok(obj); r.onerror=e=>err(e.target.error); }); }
 function delBruto(store,id){ return new Promise((ok,err)=>{ const r=tx(store,"readwrite").delete(id); r.onsuccess=()=>ok(); r.onerror=e=>err(e.target.error); }); }
 
@@ -866,7 +870,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "16 · lembretes";
+const APP_VERSAO = "17 · lembretes";
 const VOCAB_VERSAO = 8;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -4397,7 +4401,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,mudasDaAreaAlfa,moverMuda,numerarOrdem,dataFutura,pedidoDeLembrete,salvarLembrete,marcarLembrete,lembretesAbertos,lembretesDaArea,lembretesDaMuda,lembretesSoltos,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,mudasDaAreaAlfa,moverMuda,numerarOrdem,fecharBanco,DB_VER,STORES,dataFutura,pedidoDeLembrete,salvarLembrete,marcarLembrete,lembretesAbertos,lembretesDaArea,lembretesDaMuda,lembretesSoltos,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
