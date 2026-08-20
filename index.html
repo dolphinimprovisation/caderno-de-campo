@@ -330,8 +330,39 @@ const SAUDES = ["bem","atencao","problema"];
 const SAUDE_LB = {bem:"bem", atencao:"atenção", problema:"problema"};
 const nomeMuda = m => m ? m.especie + " " + (m.numero || 1) : "";
 const mudaById = id => S.mudas.find(m => m.id === id);
+const porNome = (a,b) => a.especie.localeCompare(b.especie) || (a.numero||1) - (b.numero||1);
+/* dentro da linha a ordem é física — a fila de plantas no terreno. Quem ainda não
+   foi posto na mão fica no fim, em ordem de nome. */
+const ordemMuda = m => (typeof m.ordem === "number") ? m.ordem : 1e6;
 const mudasDaArea = areaId => S.mudas.filter(m => m.areaId === areaId)
-  .sort((a,b) => a.especie.localeCompare(b.especie) || (a.numero||1) - (b.numero||1));
+  .sort((a,b) => ordemMuda(a) - ordemMuda(b) || porNome(a,b));
+/* na lista geral continua alfabética */
+const mudasDaAreaAlfa = areaId => S.mudas.filter(m => m.areaId === areaId).sort(porNome);
+const proximaOrdem = areaId => {
+  const ns = S.mudas.filter(m => m.areaId === areaId && typeof m.ordem === "number").map(m => m.ordem);
+  return ns.length ? Math.max.apply(null, ns) + 1 : 0;
+};
+
+/* põe números de ordem em todas as mudas da linha, do jeito que estão hoje */
+async function numerarOrdem(areaId){
+  const lista = mudasDaArea(areaId);
+  for(let i = 0; i < lista.length; i++){
+    if(lista[i].ordem !== i){ lista[i].ordem = i; await put("mudas", lista[i]); }
+  }
+  return lista;
+}
+
+/* troca uma muda de lugar com a vizinha */
+async function moverMuda(mudaId, passo){
+  const m = mudaById(mudaId); if(!m) return;
+  const lista = await numerarOrdem(m.areaId);
+  const i = lista.findIndex(x => x.id === m.id);
+  const j = i + passo;
+  if(i < 0 || j < 0 || j >= lista.length) return;
+  const a = lista[i], b = lista[j];
+  const t = a.ordem; a.ordem = b.ordem; b.ordem = t;
+  await put("mudas", a); await put("mudas", b);
+}
 const idMuda = (areaId, especie, numero) =>
   "muda-" + String(areaId).replace(/^area-/,"") + "-" + normalizarFala(especie).replace(/\s+/g,"-") + "-" + (numero || 1);
 function proximoNumero(areaId, especie){
@@ -797,7 +828,7 @@ function tocar(g, botao){
 
 
 /* ============ vocabulário do Rob ============ */
-const APP_VERSAO = "14 · voltar certo";
+const APP_VERSAO = "15 · ordem na linha";
 const VOCAB_VERSAO = 8;
 const VOCAB_AREAS = [
   {nome:"Linha esquerda",    tipo:"Linha", apelidos:["linha da esquerda","esquerda","linda esquerda","lima esquerda","linha esquerdo"]},
@@ -1887,6 +1918,7 @@ async function criarMudas(areaId, especie, quantos, extra){
     const m = Object.assign({
       id: idMuda(areaId, nome, numero), areaId, especie: nome, numero,
       saude: "bem", desdeEm: todayISO(), apelidos: [], obs: "",
+      ordem: proximaOrdem(areaId),
       criadoEm: new Date().toISOString()
     }, extra || {});
     m.id = idMuda(areaId, nome, numero); m.numero = numero;
@@ -2753,9 +2785,9 @@ function telaConfirmar(texto, drafts, g, previasFixas){
 let tab="home", stack=null;
 /* De onde você veio. Sem isso a seta de voltar joga todo mundo no menu Mais,
    mesmo quem entrou pela lista de mudas ou pela tela da linha. */
-let voltarFn = null;
+let voltarFn = null, reordenando = null;
 function abrir(destino, volta){ voltarFn = volta || null; stack = destino; render(); window.scrollTo(0,0); }
-function go(t){ tab=t; stack=null; voltarFn=null; render(); window.scrollTo(0,0); }
+function go(t){ tab=t; stack=null; voltarFn=null; reordenando=null; render(); window.scrollTo(0,0); }
 $("#backBtn").onclick=()=>{
   const f = voltarFn; voltarFn = null; stack = null;
   if(f) f(); else render();
@@ -3108,26 +3140,56 @@ function screenAreaDetalhe(id){
   }
 
   const ms=mudasDaArea(a.id);
-  const sm=el("div","sec"); sm.appendChild(el("div","sec-t","Mudas nesta linha"));
+  const arrumando = reordenando === a.id;
+  const sm=el("div","sec");
+  const cab=el("div"); cab.style.cssText="display:flex;align-items:baseline;gap:10px";
+  const tt=el("div","sec-t","Mudas nesta linha"); tt.style.flex="1"; cab.appendChild(tt);
+  if(ms.length > 1){
+    const rb=el("button","linkbtn", arrumando ? "Pronto" : "Mudar a ordem");
+    rb.onclick=async()=>{
+      if(!arrumando) await numerarOrdem(a.id);
+      reordenando = arrumando ? null : a.id;
+      render();
+    };
+    cab.appendChild(rb);
+  }
+  sm.appendChild(cab);
+  if(arrumando){
+    const dica=el("div","t2"); dica.style.margin="2px 0 8px";
+    dica.textContent="Use as setas para pôr na ordem do terreno. Vale para o cartão da linha também.";
+    sm.appendChild(dica);
+  }
   if(ms.length){
     const c=el("div","card");
-    ms.forEach(m=>{
-      const b=el("button","acard"); const bd2=el("div","bd");
-      bd2.appendChild(el("div","nm",esc(nomeMuda(m))));
+    ms.forEach((m, ix)=>{
+      const b=el(arrumando ? "div" : "button","acard"); const bd2=el("div","bd");
+      bd2.appendChild(el("div","nm",esc((arrumando ? (ix+1) + ". " : "") + nomeMuda(m))));
       const quantos=S.registros.filter(r=>r.mudaId===m.id).length;
       bd2.appendChild(el("div","mt",esc((m.variedade?m.variedade+" · ":"")+
         (quantos?quantos+" anotação"+(quantos>1?"ões":""):"nenhuma anotação própria"))));
       b.appendChild(bd2);
-      b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
-        esc(SAUDE_LB[m.saude||"bem"])));
-      const volta = voltarFn;
-      b.onclick=()=>abrir({tipo:"muda",id:m.id}, ()=>abrir({tipo:"area",id:a.id}, volta));
+      if(arrumando){
+        const setas=el("div","chips"); setas.style.cssText="flex:0 0 auto;gap:6px";
+        const sobe=el("button","chip","&#9650;"); sobe.disabled = ix === 0;
+        sobe.onclick=async(e)=>{ e.stopPropagation(); await moverMuda(m.id,-1); render(); };
+        const desce=el("button","chip","&#9660;"); desce.disabled = ix === ms.length-1;
+        desce.onclick=async(e)=>{ e.stopPropagation(); await moverMuda(m.id, 1); render(); };
+        setas.appendChild(sobe); setas.appendChild(desce);
+        b.appendChild(setas);
+      } else {
+        b.appendChild(el("div","pill "+(m.saude==="problema"?"bad":m.saude==="atencao"?"warn":"ok"),
+          esc(SAUDE_LB[m.saude||"bem"])));
+        const volta = voltarFn;
+        b.onclick=()=>abrir({tipo:"muda",id:m.id}, ()=>abrir({tipo:"area",id:a.id}, volta));
+      }
       c.appendChild(b);
     });
     sm.appendChild(c);
   } else sm.appendChild(el("div","empty","Nenhuma muda cadastrada nesta linha."));
-  const nb=btn("+ Nova muda","sec",()=>formMuda(null,{areaId:a.id})); nb.style.marginTop="10px"; nb.style.flex="1";
-  sm.appendChild(nb);
+  if(!arrumando){
+    const nb=btn("+ Nova muda","sec",()=>formMuda(null,{areaId:a.id})); nb.style.marginTop="10px"; nb.style.flex="1";
+    sm.appendChild(nb);
+  }
   v.appendChild(sm);
 
   const fotos=rs.filter(r=>r.foto).sort((x,y)=>y.data.localeCompare(x.data));
@@ -3384,7 +3446,7 @@ function screenMudas(){
     v.appendChild(e);
   } else {
     S.areas.forEach(a=>{
-      const ms=mudasDaArea(a.id); if(!ms.length) return;
+      const ms=mudasDaAreaAlfa(a.id); if(!ms.length) return;
       const s=el("div","sec"); s.appendChild(el("div","sec-t",a.nome+(a.situacao==="parada"?" · parada":"")));
       const c=el("div","card");
       ms.forEach(m=>{
@@ -4048,7 +4110,7 @@ async function exemplos(){
     console.error(e);
   }
 })();
-window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
+window.__app={S,load,render,statusGeral,interpretar,telaConfirmar,numerosParaDigitos,sincronizar,novoCaderno,saveCfg,put,del,marcarTudoPendente,canonizarIds,repararOrfaos,juntarDuplicatas,tarefas,proximaDe,salvarRegra,migrarFrequencias,migrarSituacaoDasAreas,diasDaFrequencia,normalizarFala,fragmentar,criarMudas,mudarSituacaoArea,acharMuda,nomeMuda,idMuda,proximoNumero,mudasDaArea,mudasDaAreaAlfa,moverMuda,numerarOrdem,saudeDaArea,areaParada,listaAcoes,instalarAcoes,ensinarVerbo,acharAcao,idAcao,pontuarFala,melhorAlternativa,corrigirFrase,abrirProblema,fecharProblema,reabrirProblema,problemasAbertos,problemasDaArea,problemasDaMuda,garantirMal,instalarMales,nomeDoMal,idMal,avisosDoPlano,temPlano,bateCom,salvarPlano,acrescentarAoPlano,planoDaEspecie,mudasDaEspecie,blocosDoPlano,blocoDeHoje,mesesDoTitulo,migrarPlanosParaEspecie,resumoDaArea,fraseDoResumo,pedeAtencao,totaisGerais,pedidoDeResumo,periodoDaFala,abrirResumo};
 
 if("serviceWorker" in navigator && location.protocol==="https:"){
   window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e)); });
